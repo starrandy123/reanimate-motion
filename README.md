@@ -80,6 +80,21 @@ faster than 1,500°/s · R7 Blender and three.js agree within 2 cm. Each has a p
 
 ## What it does not do yet
 
-One person; a camera that holds still (a moving camera needs its own motion taken from the background, GEM-X's way: next). Parts out
+One person; a camera that holds still (a moving camera needs its own motion taken from the background: next). Parts out
 of the picture are bridged, not seen. Depth from one camera is reconstructed, not measured. Hands and fingers turn only with
 `--hands`, for clips where they are large and sharp. Licences, and what they mean for commercial use: [CREDITS.md](CREDITS.md).
+
+## Why not NVIDIA's GEM-X?
+
+[GEM-X](https://github.com/NVlabs/GEM-X) turns a video into a 3D body too, and it is where this kit learned to bridge what the camera
+loses, to lock feet and to take a moving camera from the background. It is not bundled:
+
+- it reads the same video: another reader, not more footage;
+- what leaves the picture is a guess either way (GEM-X fills it from what it learned, this kit bridges it evenly): a wider shot is
+  what measures it;
+- for a moving camera it runs ViPE, which is built on CUDA, so it needs an NVIDIA card. This kit runs on a laptop's CPU and is headed
+  for the browser;
+- its weights are about 7 GB.
+
+Where GEM-X is ahead is the licence: its weights are licensed for commercial use and it learned from NVIDIA's own motion capture
+([CREDITS.md](CREDITS.md)). If your project needs that on paper, GEM-X is the route.

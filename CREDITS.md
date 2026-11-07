@@ -20,8 +20,10 @@ The kit's own code is MIT (LICENSE). What it runs or learned from:
 
 **Before you ship motion made with it in a commercial product:** RTMW3D's depth was learned partly from Human3.6M, whose licence is
 academic use only, and most pose models (RTMPose's Body7 too) were trained on academic datasets. A lawyer's reading decides what that
-means for motion you derive. For commercial work the kit's 2D path (`--2d`, depth by Taylor and anatomy alone) and NVIDIA's GEM-X
-(trained on NVIDIA's own motion capture, its weights licensed for commercial use) are the cleaner routes.
+means for motion you derive. Cleaner for commercial work: track with `--model halpe26`
+and clean with `--2d` (no Human3.6M in its models, depth by Taylor and anatomy alone; its 2D model still learned partly from academic
+sets, like most). The one route clean on paper is NVIDIA's GEM-X (trained on NVIDIA's own motion capture, its weights licensed for
+commercial use).
 
 Reference videos: copy the motion of a video you may use (your own, or one whose licence allows it). Footage studied only for its
 mechanics is never redistributed and never shown.
