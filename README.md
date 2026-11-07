@@ -98,7 +98,7 @@ Mixkit's terms forbid handing the files on):
 
 R1 legs and feet held in ≥ 90 % of frames · R2 every limb bone within 5 % of its length · R3 knees in front where a thigh points out,
 none bent backward · R4 a fall filmed 10x slow reads 10x · R5 the written skeleton puts knees and ankles back within 3 cm · R6 no bone
-faster than 1,500°/s · R7 Blender and three.js agree within 2 cm · R8 the rider's leg is a person's: a shoe the detector calls a board never sets the scale · R9 no wrist inside the trunk in more than 2 % of frames · R10 the chest turns at most 45° against the pelvis (98 % of frames) · R11 the skeleton's shoulders within 3 cm and wrists within 6 cm of the tracked ones · R12 where the picture shows an arm straight, its 3D elbow bends 20° or less · R13 the character's own hands and forearms never inside its own body (`rmo fit`, read on its mesh) · R6 again on the fitted motion. Each has a planted defect that must turn it red.
+faster than 1,500°/s · R7 Blender and three.js agree within 2 cm · R8 the rider's leg is a person's: a shoe the detector calls a board never sets the scale · R9 no wrist inside the trunk in more than 2 % of frames · R10 the chest turns at most 45° against the pelvis (98 % of frames) · R11 the skeleton's shoulders within 3 cm and wrists within 6 cm of the tracked ones · R12 where the picture shows an arm straight, its 3D elbow bends 20° or less · R13 the character's own hands and forearms never inside its own body (`rmo fit`, read on its mesh) · R14 the head faces the side the picture shows the face on · R15 each limb bone within 10 % of its other side's length · R6 again on the fitted motion. Each has a planted defect that must turn it red.
 
 ## What it does not do yet
 

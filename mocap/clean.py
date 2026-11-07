@@ -42,12 +42,46 @@ report = {'frames': n, 'unsure': int(np.isnan(Z[:, :23]).sum()), 'depth_from': '
 # 2 left and right put back, limb by limb
 LEG = ([11, 13, 15, 17, 18, 19], [12, 14, 16, 20, 21, 22]); ARM = ([5, 7, 9] + list(range(91, 112)), [6, 8, 10] + list(range(112, 133)))
 swaps = 0
-for L, R in (LEG, ARM):
+def dist_(P, Q): return np.nanmean(np.linalg.norm(P - Q, axis=-1)) if np.isfinite(P - Q).any() else np.inf
+# THE LEGS, OVER THE WHOLE CLIP, WITH THE SHOES AS WITNESSES (7 Nov, Mixkit 6718): decided frame by frame against the frame before, one
+# frame where the model had its feet the wrong way round (frame 26: the feet together at the push) was taken as the truth, and the legs
+# were swapped for the 25 frames after, where the model was right; the shoe trackers (followed as pictures, not by the model's labels)
+# then put the feet back on their own shoes, and the right shin read 0.77 m against the left's 0.44. So the legs' sides are chosen over
+# the whole clip (a Viterbi path, as the arms' depth and the shoulder line are): a frame's cost is how far its feet are from the shoes
+# the trackers hold (capped at a foot's size: a tracker that wandered says little), a change between frames costs how far the legs move
+legpx0 = np.nanmedian(np.linalg.norm(K[:, 11] - K[:, 13], axis=-1) + np.linalg.norm(K[:, 13] - K[:, 15], axis=-1)); cap = 0.32 * legpx0
+FT = {'L': [15, 17, 18, 19], 'R': [16, 20, 21, 22]}
+def foot_c(t, ids):
+    p = K[t, ids]; ok = np.isfinite(p[:, 0]); return p[ok].mean(0) if ok.sum() >= 2 else None
+unary = np.zeros((n, 2)); steps = np.zeros((n, 2, 2)); last, have = None, None
+for t in range(n):
+    fl, fr_ = foot_c(t, FT['L']), foot_c(t, FT['R']); sl, sr = shoe['L'][t], shoe['R'][t]
+    if fl is not None and fr_ is not None and np.isfinite(sl).all() and np.isfinite(sr).all():
+        c = lambda a, b: min(float(np.linalg.norm(a - b)), 2 * cap)
+        unary[t] = [c(fl, sl) + c(fr_, sr), c(fr_, sl) + c(fl, sr)]
+    ok = np.isfinite(K[t, LEG[0] + LEG[1], 0]).sum() >= 4
+    if ok and last is not None:
+        Lp, Rp = last
+        for a in range(2):                                   # a: the previous frame's state, b: this frame's (1 = swapped)
+            PL, PR = (Lp, Rp) if a == 0 else (Rp, Lp)
+            for b in range(2):
+                CL, CR = (K[t, LEG[0]], K[t, LEG[1]]) if b == 0 else (K[t, LEG[1]], K[t, LEG[0]])
+                v = dist_(CL, PL) + dist_(CR, PR); steps[t, a, b] = v if np.isfinite(v) else 0.0
+    if ok: last = (K[t, LEG[0]].copy(), K[t, LEG[1]].copy())
+    elif last is not None: steps[t] = 0.0
+acc = unary[0].copy(); back = np.zeros((n, 2), int)
+for t in range(1, n):
+    tot = acc[:, None] + steps[t]; back[t] = tot.argmin(0); acc = tot.min(0) + unary[t]
+st = np.zeros(n, int); st[-1] = int(np.argmin(acc))
+for t in range(n - 1, 0, -1): st[t - 1] = back[t, st[t]]
+for t in np.flatnonzero(st):
+    for arr in (K, Z, S): arr[t, LEG[0]], arr[t, LEG[1]] = arr[t, LEG[1]].copy(), arr[t, LEG[0]].copy()
+swaps += int(st.sum())
+for L, R in (ARM,):
     last = {}
     for t in range(n):
         if t and all(k in last for k in 'LR'):
-            d = lambda P, Q: np.nanmean(np.linalg.norm(P - Q, axis=-1)) if np.isfinite(P - Q).any() else np.inf
-            same, cross = d(K[t, L], last['L']) + d(K[t, R], last['R']), d(K[t, L], last['R']) + d(K[t, R], last['L'])
+            same, cross = dist_(K[t, L], last['L']) + dist_(K[t, R], last['R']), dist_(K[t, L], last['R']) + dist_(K[t, R], last['L'])
             if np.isfinite(cross) and cross < 0.6 * same:
                 for arr in (K, Z, S): arr[t, L], arr[t, R] = arr[t, R].copy(), arr[t, L].copy()
                 swaps += 1
@@ -91,6 +125,7 @@ for j in range(J):
     for c in range(2): K[:, j, c] = fill(hampel(K[:, j, c]))
     Z[:, j] = fill(hampel(Z[:, j]))
 for c in range(4): board[:, c] = fill(board[:, c], 30)
+
 
 BONES = [(5, 7), (7, 9), (6, 8), (8, 10), (11, 13), (13, 15), (12, 14), (14, 16), (5, 6), (11, 12), (5, 11), (6, 12)]
 # which way the model's depth runs: the nose is nearer the camera than the ears when the face is seen
@@ -205,6 +240,30 @@ for a_, b_ in ((11, 12), (5, 6)):                         # the pelvis and the s
     d2 = np.linalg.norm(K[:, a_] - K[:, b_], axis=-1); Lb = np.nanpercentile(d2[np.isfinite(d2)], 95)
     dz = np.sqrt(np.maximum(0, Lb ** 2 - d2 ** 2)) / ppm; sgn = near_end(Dm[:, a_] - Dm[:, b_], dz, Lb / ppm)
     c = 0.0 if a_ == 11 else trunk_dep
+    if a_ == 11:
+        # THE KNEES SAY WHICH HIP IS NEARER (7 Nov, Mixkit 6718's air): a rider in profile shows his hip line end-on, and which end is
+        # nearer the camera is the model's vote alone; it swung the pelvis about at frame 54 and both knees then read bent backward in 40 %
+        # of the air's frames. In profile, a knee's bend lies in the picture's plane: the picture shows which way it bends, and a knee bends
+        # only forward (the hip line, left minus right, along the thigh-shin cross product). So the pelvis's side is chosen over the clip (a
+        # Viterbi path, as the shoulder line's): a leg the picture shows bent 25° or more that would bend backward costs 50 a frame (only
+        # where the hip line points 45° or more out of the picture), the model's vote 1, a change of side 200 except in the picture's plane
+        def cz(a, b, c_):
+            u = K[:, b] - K[:, a]; w = K[:, c_] - K[:, b]; u = u * np.array([1.0, -1.0]); w = w * np.array([1.0, -1.0])   # y up
+            cr = u[:, 0] * w[:, 1] - u[:, 1] * w[:, 0]; nn = np.linalg.norm(u, axis=-1) * np.linalg.norm(w, axis=-1) + 1e-9
+            return cr / nn                                                        # the sine of the bend in the picture, its sign the bend's way
+        prof = np.nan_to_num(dz, nan=0.0) > np.sin(np.radians(45)) * Lb / ppm
+        costp = np.zeros((n, 2))
+        for k_, s_ in enumerate((1.0, -1.0)):
+            costp[:, k_] = (sgn != s_).astype(float)
+            for hh, kk, aa in ((11, 13, 15), (12, 14, 16)):
+                sb = cz(hh, kk, aa); clear = np.abs(np.nan_to_num(sb)) > np.sin(np.radians(25))
+                costp[:, k_] += 50.0 * (prof & clear & (np.sign(np.nan_to_num(sb)) * zs * s_ < 0))
+        swp = np.where(np.nan_to_num(dz, nan=0.0) < Lb / ppm / 10, 0.0, 200.0); accp = costp[0].copy(); backp = np.zeros((n, 2), int)
+        for t in range(1, n):
+            move = accp[::-1] + swp[t]; backp[t] = np.where(accp <= move, [0, 1], [1, 0]); accp = np.minimum(accp, move) + costp[t]
+        stp = np.zeros(n, int); stp[-1] = int(np.argmin(accp))
+        for t in range(n - 1, 0, -1): stp[t - 1] = backp[t, stp[t]]
+        newp = np.where(stp == 0, 1.0, -1.0); report['pelvis_turned_by_the_knees'] = int((newp != sgn).sum()); sgn = newp
     if a_ == 5:
         # THE SPINE TWISTS ABOUT 40° EACH WAY (7 Nov, his word on the MOTION cut: "the body twisting with the hands too in the tricks"; the thoracic
         # spine turns about 35° and the lumbar about 5° to a side: White & Panjabi, Clinical Biomechanics of the Spine, 1990). Taken from the
@@ -237,10 +296,18 @@ def in_trunk(Q, k=1.0):
     latn = lat / np.maximum(2 * hw, 1e-9)[:, None]; fw = np.cross(latn, upv / np.maximum(Lu, 1e-9)[:, None])
     v = Q - hp3; a = np.einsum('ij,ij->i', v, upv) / np.maximum(Lu ** 2, 1e-9); r = v - a[:, None] * upv
     return (a > 0.05) & (a < 1.0) & (np.abs(np.einsum('ij,ij->i', r, latn)) < 0.85 * k * hw) & (np.abs(np.einsum('ij,ij->i', r, fw)) < 0.6 * k * hw)
+MIRROR = {(11, 13): (12, 14), (12, 14): (11, 13), (13, 15): (14, 16), (14, 16): (13, 15), (5, 7): (6, 8), (6, 8): (5, 7), (7, 9): (8, 10), (8, 10): (7, 9)}
 def bone_depth(p_, c_):
     """a bone's length (metres), its depth's size each frame (Taylor), and the model's vote on its side"""
     d2 = np.linalg.norm(K[:, c_] - K[:, p_], axis=-1)
     Lb = np.nanpercentile(d2[np.isfinite(d2)], 95)
+    if (p_, c_) in MIRROR:
+        # A PERSON'S TWO SIDES ARE ONE LENGTH (7 Nov, Mixkit 6718): a limb the picture never shows lying flat reads its longest as its
+        # length, and the rider's right upper arm, held toward the camera through the clip, came out 0.29 m to his left's 0.36 (and every
+        # frame read the left as pointing out of the picture). Each limb bone takes the longer of its two sides' lengths (bilateral symmetry,
+        # the usual prior in single-view 3D poses: Taylor 2000 takes the relative lengths as known); the arm's anatomy cap below still holds
+        m_ = MIRROR[(p_, c_)]; d2m = np.linalg.norm(K[:, m_[1]] - K[:, m_[0]], axis=-1)
+        if np.isfinite(d2m).sum() > 10: Lb = max(Lb, np.nanpercentile(d2m[np.isfinite(d2m)], 95))
     if c_ in (7, 8, 9, 10):                                  # an arm bone no longer than 1.15 of what anatomy gives it against the trunk (upper arm 0.186 H,
         # forearm 0.146 H, shoulder to hip 0.288 H: Drillis & Contini 1966 in Winter's table): a wrist read far off in a few frames had made
         # Mixkit 49634's right forearm 0.68 of the trunk (anatomy 0.51), and every other frame read as pointing at the camera

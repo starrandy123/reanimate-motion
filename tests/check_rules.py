@@ -16,6 +16,8 @@ turns it red: a check that cannot fail is no check.
                                                                                       plant: the shoulder line turned 90° for a third of the clip
   R11 PLACED  the skeleton's shoulders within 3 cm and its wrists within 6 cm of the tracked ones (medians) plant: the spine leaning 20° off
   R12 STRAIGHT where the picture shows an arm straight, its 3D elbow bends 20° or less (median)   plant: each forearm's depth mirrored
+  R15 SYMMETRIC each limb bone within 10 % of its other side's length (thigh, shin, upper arm, forearm)
+                                                                                      plant: one shin's ankle carried 50 % further along it
                                                                                       plant: the board taken whatever leg it implies (before 7 Nov)"""
 import sys, os, json, copy, subprocess
 import numpy as np
@@ -211,18 +213,33 @@ def r14(plant=False):
     v = eyes - ear; L = np.linalg.norm(v, axis=-1); side = v[:, 0] / np.maximum(L, 1e-6)
     ok = (sc[:, [1, 2]] > 0.5).all(1) & (s3 | s4) & (L > 4) & (np.abs(side) > 0.6)
     real = Mm['video_per_real_second']; a0 = Mm['clip_from'] or 0
-    idx = np.clip(np.round((np.arange(len(k)) - a0) / real * Mm['fps']).astype(int), 0, Mm['frames'] - 1); ok &= np.arange(len(k)) >= a0
+    # only the frames the motion plays: a solve of frames 44-64 had every later frame of the clip read against its last frame's head
+    a1 = Mm.get('clip_to') or len(k); fr_ = np.arange(len(k))
+    idx = np.clip(np.round((fr_ - a0) / real * Mm['fps']).astype(int), 0, Mm['frames'] - 1); ok &= (fr_ >= a0) & (fr_ < a1)
     if ok.sum() < 10: return None, f'the face to one side in {int(ok.sum())} frames: not read'
     head = Rot.from_quat(np.array(Mm['world']['Head'])).apply([0, 0, 1.0])[idx]                     # where the head faces (x: the picture's right)
     hx = -head[:, 0] if plant else head[:, 0]
     agree = float((np.sign(hx[ok]) == np.sign(side[ok])).mean())
     return agree >= 0.9, f'the head faces the side the face is on in {100 * agree:.0f}% of {int(ok.sum())} frames'
+def r15(X):
+    """A PERSON'S TWO SIDES ARE ONE LENGTH (7 Nov, Mixkit 6718: clean swapped the legs for 25 frames on one frame's mislabel, the shoe
+    trackers put the feet back, and the right shin came out 0.77 m against the left's 0.44; every other rule read that skeleton). Each limb
+    bone's median length within 10 % of its other side's (a healthy adult's legs differ by under 2 cm in most people: Knutson, Chiropractic
+    & Osteopathy 2005)"""
+    worst, at = 0.0, None
+    for (a, b), (c, d), nm in (((11, 13), (12, 14), 'thigh'), ((13, 15), (14, 16), 'shin'), ((5, 7), (6, 8), 'upper arm'), ((7, 9), (8, 10), 'forearm')):
+        l, r = (float(np.nanmedian(np.linalg.norm(X[:, i] - X[:, j], axis=-1))) for i, j in ((a, b), (c, d)))
+        v = abs(l - r) / min(l, r)
+        if v > worst: worst, at = v, f'{nm} {l:.2f} / {r:.2f} m'
+    return worst <= 0.10, f'the sides differ by {100 * worst:.0f}% at most ({at})'
+def p15(X):
+    X = X.copy(); X[:, 16] = X[:, 14] + 1.5 * (X[:, 16] - X[:, 14]); return X
 RULES = [('R1 TRACKED', lambda: r1(T), lambda: r1(p1(T))), ('R2 RIGID', lambda: r2(X), lambda: r2(p2(X))), ('R3 ANATOMY', lambda: r3(XW), lambda: r3(p3(XW))),
          ('R4 CLOCK', lambda: r4(9.81), lambda: r4(9.81 / 2)), ('R5 SOLVED', lambda: r5(M['world']), lambda: r5(p5(M['world']))),
          ('R6 SMOOTH', lambda: r6(M['world']), lambda: r6(p6(M['world']))),
          ('R6 FITTED', lambda: r6(json.load(open(FITTED))['world']) if os.path.exists(FITTED) else (None, 'no fitted motion: not read'), lambda: r6(p6(json.load(open(FITTED))['world'])) if os.path.exists(FITTED) else (None, '')), ('R7 HOSTS', lambda: r7(False), lambda: r7(True)),
          ('R8 SCALE', lambda: r8(False), lambda: r8(True)), ('R9 HANDS', lambda: r9(X), lambda: r9(p9(X))), ('R10 TWIST', lambda: r10(X), lambda: r10(p10(X))),
-         ('R11 PLACED', lambda: r11(M['world']), lambda: r11(p11(M['world']))), ('R12 STRAIGHT', lambda: r12(X), lambda: r12(p12(X))),
+         ('R11 PLACED', lambda: r11(M['world']), lambda: r11(p11(M['world']))), ('R12 STRAIGHT', lambda: r12(X), lambda: r12(p12(X))), ('R15 SYMMETRIC', lambda: r15(X), lambda: r15(p15(X))),
          ('R13 CLEAR', lambda: r13(False), lambda: r13(True)), ('R14 HEAD', lambda: r14(False), lambda: r14(True))]
 held = True
 for name, real, plant in RULES:

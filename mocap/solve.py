@@ -111,8 +111,12 @@ for t in range(n):
     q = np.stack([X[t, FIDX, 0] * _ppm, -X[t, FIDX, 1] * _ppm], -1)                          # back to the picture's pixels (y down)
     if not np.isfinite(q).all(): _rv = _tv = None; continue
     q = q - q.mean(0)
-    ok, _rv, _tv = cv2.solvePnP(FACE3D, q, _cam, None, flags=cv2.SOLVEPNP_SQPNP)              # the global optimum, fresh each frame (seeded by the
-    # last frame, the local solver carried a face turned the wrong way through 15 frames of Mixkit 49634)
+    # a face too small or too flat in the picture to read a turn from (Mixkit 6718 and 6719: a rider far off, his six face points within a
+    # few pixels or on one line; OpenCV's SQPnP refuses such points with an assertion) is a face not seen: the ears' turn stands there
+    if np.ptp(q[:, 0]) < 8 or np.ptp(q[:, 1]) < 8 or np.linalg.svd(q, compute_uv=False)[-1] < 1.0: _rv = _tv = None; continue
+    try: ok, _rv, _tv = cv2.solvePnP(FACE3D, q, _cam, None, flags=cv2.SOLVEPNP_SQPNP)         # the global optimum, fresh each frame (seeded by the
+    except cv2.error: ok = False                                                               # last frame, the local solver carried a face turned the
+    # wrong way through 15 frames of Mixkit 49634)
     if ok and _tv[2, 0] > 0: Mhead[t] = _C @ cv2.Rodrigues(_rv)[0]; face_seen[t] = True        # the face's turn in our frame (x right, y up, z to the camera)
     else: _rv = _tv = None
 from scipy.signal import medfilt as _medfilt, butter as _bw, filtfilt as _ff
