@@ -18,15 +18,19 @@
 <div id="bar"><button id="play">Pause</button><input id="scrub" type="range" min="0" max="1000" value="0"><span id="clock">0.00 s</span></div>
 <script type="module">
 /* ?motion=<motion.json>&character=<a T-posed .glb with Mixamo, Unreal or VRM bone names>&speed=1
+   Filming (tools/film.mjs): &only=character (no sticks, the character centred) &follow=1 (the camera follows the hips) &film=1 (no
+   clock of its own: it draws only when __rmo.set is called, so every frame is the same every run) &ui=0 (no bar) &bg=%23rrggbb
    Left: the solved skeleton as sticks (what rmo solve wrote). Right: the character wearing it (web/retarget.js). */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { bindMotion } from '../../web/retarget.js';
 const Q = new URLSearchParams(location.search), motionUrl = Q.get('motion') || 'motion.json', charUrl = Q.get('character');
+const ONLY = Q.get('only') === 'character', FOLLOW = Q.get('follow') === '1', FILM = Q.get('film') === '1';
+if (Q.get('ui') === '0') document.getElementById('bar').style.display = 'none';
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.setSize(innerWidth, innerHeight); document.body.prepend(renderer.domElement);
-const scene = new THREE.Scene(); scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f4f2ee');
+const scene = new THREE.Scene(); scene.background = new THREE.Color(Q.get('bg') || getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f4f2ee');
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 100); camera.position.set(0.9, 1.1, 4.2);
 const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0.9, 0.9, 0); controls.update();
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8070, 2.2)); const sun = new THREE.DirectionalLight(0xffffff, 2); sun.position.set(2, 4, 3); scene.add(sun);
@@ -48,7 +52,7 @@ function fk(f) {
 }
 let char = null, bound = null;
 if (charUrl) {
-  const g = await new GLTFLoader().loadAsync(charUrl); char = g.scene; char.position.x = 1.8; scene.add(char);
+  const g = await new GLTFLoader().loadAsync(charUrl); char = g.scene; char.position.x = ONLY ? 0 : 1.8; scene.add(char);
   for (const name of (Q.get('hide') || '').split(',').filter(Boolean)) char.traverse((o) => { if (o.name === name) o.visible = false; });   // ?hide=attach-righthand-mesh: a prop the model holds
   bound = bindMotion(char, motion, { inPlace: false });
 }
@@ -61,12 +65,20 @@ function draw(time) {
     arr.set([a.x, a.y, a.z, c.x, c.y, c.z], i * 6); joints.setMatrixAt(i, m.makeTranslation(a.x, a.y, a.z));
   });
   sticks.geometry.attributes.position.needsUpdate = true; joints.instanceMatrix.needsUpdate = true;
-  if (bound) { bound.apply(time); }
+  if (bound) { bound.apply(time); if (FOLLOW) follow(); }
   renderer.render(scene, camera);
   document.getElementById('clock').textContent = time.toFixed(2) + ' s';
 }
+if (ONLY) { sticks.visible = false; joints.visible = false; camera.position.set(0, 1.0, 3.4); controls.target.set(0, 0.9, 0); controls.update(); }
+let camT = null;
+function follow() {   /* the camera keeps its offset and eases toward the hips (one step a drawn frame) */
+  const hb = bound.bones.Hips; if (!hb) return;
+  const h = hb.getWorldPosition(new THREE.Vector3()), want = new THREE.Vector3(h.x, Math.max(0.8, h.y), h.z);
+  if (!camT) camT = want.clone(); else camT.lerp(want, 0.2);
+  const d = camera.position.clone().sub(controls.target); controls.target.copy(camT); camera.position.copy(camT).add(d); controls.update();
+}
 const dur = motion.frames / motion.fps;
-renderer.setAnimationLoop((now) => {
+if (!FILM) renderer.setAnimationLoop((now) => {
   if (playing) { t = (t + (now - last) / 1000 * speed) % dur; document.getElementById('scrub').value = String(Math.round(t / dur * 1000)); }
   last = now; draw(t);
 });

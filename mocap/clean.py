@@ -245,10 +245,9 @@ def bridge(p_, c_, L_):
     v = X[:, c_] - X[:, p_]; u = v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-9); idx = np.arange(n)
     for run in np.split(idx[gap], np.where(np.diff(idx[gap]) != 1)[0] + 1):
         a0, b0 = run[0] - 1, run[-1] + 1
-        ua = u[a0] if a0 >= 0 else None; ub = u[b0] if b0 < n else None
-        if ua is None and ub is None: continue
-        if ua is None or not np.isfinite(ua).all(): ua = ub
-        if ub is None or not np.isfinite(ub).all(): ub = ua
+        ok_a = a0 >= 0 and bool(np.isfinite(u[a0]).all()); ok_b = b0 < n and bool(np.isfinite(u[b0]).all())
+        if not (ok_a or ok_b): continue                            # neither end of the gap holds a bone to turn from: left unseen
+        ua = u[a0] if ok_a else u[b0]; ub = u[b0] if ok_b else ua   # a gap at the clip's start or end holds the one end it has
         om = np.arccos(np.clip(ua @ ub, -1, 1))
         for k, t in enumerate(run):
             f = (k + 1) / (len(run) + 1)

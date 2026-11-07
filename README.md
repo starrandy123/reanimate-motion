@@ -45,8 +45,24 @@ rmo track <video> <work> [--model halpe26]   every frame: 133 body points with d
 rmo clean <track.json> <clean.json> [--2d]   left/right fixed, shoes blended, outliers, gaps, the clock, smoothing, depth
 rmo solve <clean.json> <out> [--fps 60]      motion.bvh (Mixamo bone names) + motion.json (each bone's world turn)
 rmo view <solve dir> <out dir>               the three.js example, stilled at chosen times (examples/threejs/index.html)
+rmo film <work> [--video V] [--character G]  the character beside the video, frame for frame: film/side.mp4, character.mp4
 rmo blender <motion.json> <rig> <out>        a Blender character (.glb .fbx .blend) keyed with the motion
 rmo check <work> [--baked <glb>]             every rule, each proven red by a planted defect
+```
+
+## Try it on free clips
+
+Any video you may use works. These free clips from Mixkit (the Mixkit Stock Video Free License: commercial use, edits and social
+posts allowed, no credit required) were run through the kit on 7 Nov 2026; download them from their pages (they are not bundled:
+Mixkit's terms forbid handing the files on):
+
+| Clip | What it moves |
+|---|---|
+| [Boy doing a pirouette with a skateboard in a park](https://mixkit.co/free-stock-video/boy-doing-a-pirouette-with-a-skateboard-in-a-park-34382/) | a board trick, filmed slow (the clock reads 6.3x) |
+| [A young man performs a karate kick to the air](https://mixkit.co/free-stock-video/a-young-man-performs-a-karate-kick-to-the-air-49634/) | a high kick on black |
+
+```sh
+./rmo all 34382-1080.mp4 work/skate && ./rmo film work/skate --video 34382-1080.mp4 --hide attach-righthand-mesh
 ```
 
 ## How each step works, and where it comes from
