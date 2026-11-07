@@ -112,5 +112,10 @@ loses, to lock feet and to take a moving camera from the background. It is not b
   for the browser;
 - its weights are about 7 GB.
 
+**InstantHMR** ([Naturalpad-studio/InstantHMR](https://github.com/Naturalpad-studio/InstantHMR), tried 7 Nov 2026) recovers a whole
+3D body per frame and runs on a Mac through CoreML (about 110 ms a frame here). Its `medium-commercial` model (Apache-2.0) drew both legs
+standing at the top of the free karate clip's high kick (the right foot 737 px from where it was); its `medium` model followed the kick
+(38 px) but is CC BY-NC 4.0, so it cannot carry a commercial game. Not wired in until a commercial model holds the rules.
+
 Where GEM-X is ahead is the licence: its weights are licensed for commercial use and it learned from NVIDIA's own motion capture
 ([CREDITS.md](CREDITS.md)). If your project needs that on paper, GEM-X is the route.
