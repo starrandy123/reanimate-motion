@@ -9,6 +9,7 @@ case "$cmd" in
   track)  "$PY" -I "$K/mocap/track.py" "$@" ;;
   clean)  "$PY" -I "$K/mocap/clean.py" "$@" ;;
   solve)  "$PY" -I "$K/mocap/solve.py" "$@" ;;
+  fit)    "$PY" -I "$K/mocap/fit.py" "$@" ;;
   all)    v="$1"; w="$2"; shift 2; mkdir -p "$w" && "$PY" -I "$K/mocap/track.py" "$v" "$w" && "$PY" -I "$K/mocap/clean.py" "$w/track.json" "$w/clean.json" && "$PY" -I "$K/mocap/solve.py" "$w/clean.json" "$w/solve" "$@" ;;
   view)   node "$K/tests/view.mjs" "$@" ;;
   film)   node "$K/tools/film.mjs" "$@" ;;
@@ -21,7 +22,8 @@ rmo all <video> <work> [--from F --to F]    track, clean and solve in one go
 rmo track <video> <work> [--from N --to M]  every frame: the whole body, the board, the shoes  -> track.json + track_overlay.mp4
 rmo clean <track.json> <clean.json>         blend, clean, depth, clock                           -> clean.json
 rmo solve <clean.json> <out> [--fps 60]     the skeleton's turns                                  -> motion.bvh + motion.json
-rmo film <work> [--video V] [--character G]  the character beside the video, frame for frame     -> film/side.mp4, character.mp4
+rmo fit <work> --character G [--hide N]     the motion fitted to one character: its hands kept out of its own body -> solve/motion_<G>.json
+rmo film <work> [--video V] [--character G]  the character beside the video, frame for frame     -> film/side.mp4, character.mp4 (--motion motion_<G>.json)
 rmo view <solve dir> <out dir>              the three.js example, stilled at chosen times
 rmo blender <motion.json> <character> <out> a Blender character keyed with the motion (.glb .fbx .blend)
 rmo check <work>                            every rule, each proven red by its plant

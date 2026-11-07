@@ -44,6 +44,7 @@ rmo all <video> <work> [--from F --to F]     track, clean and solve in one go
 rmo track <video> <work> [--model halpe26]   every frame: 133 body points with depth (or 26, 2D only), the board, each shoe
 rmo clean <track.json> <clean.json> [--2d]   left/right fixed, shoes blended, outliers, gaps, the clock, smoothing, depth
 rmo solve <clean.json> <out> [--fps 60]      motion.bvh (Mixamo bone names) + motion.json (each bone's world turn)
+rmo fit <work> --character <glb>             the motion fitted to that character: its hands and forearms kept out of its own body
 rmo view <solve dir> <out dir>               the three.js example, stilled at chosen times (examples/threejs/index.html)
 rmo film <work> [--video V] [--character G]  the character beside the video, frame for frame: film/side.mp4, character.mp4
 rmo blender <motion.json> <rig> <out>        a Blender character (.glb .fbx .blend) keyed with the motion
@@ -62,7 +63,9 @@ Mixkit's terms forbid handing the files on):
 | [A young man performs a karate kick to the air](https://mixkit.co/free-stock-video/a-young-man-performs-a-karate-kick-to-the-air-49634/) | a high kick on black |
 
 ```sh
-./rmo all 34382-1080.mp4 work/skate && ./rmo film work/skate --video 34382-1080.mp4 --hide attach-righthand-mesh
+./rmo all 34382-1080.mp4 work/skate
+./rmo fit work/skate --character examples/models/street-skater.glb --hide attach-righthand-mesh
+./rmo film work/skate --video 34382-1080.mp4 --hide attach-righthand-mesh --motion motion_street-skater.json
 ```
 
 ## How each step works, and where it comes from
@@ -77,7 +80,10 @@ Mixkit's terms forbid handing the files on):
 | the clock | in the air the body's centre falls at 9.81 m/s²; with the upper body carried by the hips when it leaves the picture | Dempster's segments (Winter 2009, table 4.1) |
 | depth | each bone's depth from its own length under a scaled-orthographic camera; which end is nearer by anatomy (hips flexed, knees bend one way, toes ahead), else the model, a sign never flipping on noise | C. J. Taylor, CVPR 2000 |
 | the scale | the board's length (a deck is about 0.81 m), else an adult leg | |
-| the turns | each bone aims at its child joint; its twist from a bend plane, the hip line or the shoulders; limb twist low-passed on its own | the standard swing-twist solve |
+| the arms' depth | the upper arm's and forearm's sides chosen together over the whole clip (a Viterbi path): an elbow or wrist in the trunk costs most, then a 3D bend the picture does not show (a straight arm stays straight), then the model's vote | the generic-viewpoint idea: a bend whose plane holds the line of sight is the accident |
+| the turns | each bone aims at its child joint (the spine aims from its root at the tracked mid-shoulder, its twist shared between the hip line and the shoulder line); its twist from a bend plane; limb twist low-passed on its own | the standard swing-twist solve; keypoints to BVH as in [KevinLTT/video2bvh](https://github.com/KevinLTT/video2bvh) (MIT) |
+| the shoulders | each clavicle aims the arm's root at the tracked shoulder, inside the joint's range (up 45°, down 10°, forward and back 15°) | [Physio-Pedia, Sternoclavicular Joint](https://www.physio-pedia.com/Sternoclavicular_Joint); GPnotebook |
+| the hands out of the body | `rmo fit`: the character's own body as one convex hull per body bone, of the vertices that bone moves most; a hand or forearm inside is moved out through the nearest side and the arm solved again by two-bone IK (the elbow where it is the elbow's end), the corrections eased (low-passed) so nothing snaps | the idea of Unreal's IK Retargeter op "Body Intersect Goals" (UE 5.7+, built here from its documentation, not its code); physics-asset bodies fitted to dominant-weight vertices as Unreal does |
 | retarget | a bone's world rotation = the motion's world turn × the bone's own world rotation at rest: any T-posed rig, whatever its bones' axes | |
 
 ## Using the output
@@ -92,7 +98,7 @@ Mixkit's terms forbid handing the files on):
 
 R1 legs and feet held in ≥ 90 % of frames · R2 every limb bone within 5 % of its length · R3 knees in front where a thigh points out,
 none bent backward · R4 a fall filmed 10x slow reads 10x · R5 the written skeleton puts knees and ankles back within 3 cm · R6 no bone
-faster than 1,500°/s · R7 Blender and three.js agree within 2 cm · R8 the rider's leg is a person's: a shoe the detector calls a board never sets the scale. · R9 no wrist inside the trunk in more than 2 % of frames. Each has a planted defect that must turn it red.
+faster than 1,500°/s · R7 Blender and three.js agree within 2 cm · R8 the rider's leg is a person's: a shoe the detector calls a board never sets the scale · R9 no wrist inside the trunk in more than 2 % of frames · R10 the chest turns at most 45° against the pelvis (98 % of frames) · R11 the skeleton's shoulders within 3 cm and wrists within 6 cm of the tracked ones · R12 where the picture shows an arm straight, its 3D elbow bends 20° or less · R13 the character's own hands and forearms never inside its own body (`rmo fit`, read on its mesh) · R6 again on the fitted motion. Each has a planted defect that must turn it red.
 
 ## What it does not do yet
 

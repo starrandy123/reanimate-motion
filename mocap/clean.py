@@ -237,7 +237,8 @@ def in_trunk(Q, k=1.0):
     latn = lat / np.maximum(2 * hw, 1e-9)[:, None]; fw = np.cross(latn, upv / np.maximum(Lu, 1e-9)[:, None])
     v = Q - hp3; a = np.einsum('ij,ij->i', v, upv) / np.maximum(Lu ** 2, 1e-9); r = v - a[:, None] * upv
     return (a > 0.05) & (a < 1.0) & (np.abs(np.einsum('ij,ij->i', r, latn)) < 0.85 * k * hw) & (np.abs(np.einsum('ij,ij->i', r, fw)) < 0.6 * k * hw)
-for p_, c_ in TREE:
+def bone_depth(p_, c_):
+    """a bone's length (metres), its depth's size each frame (Taylor), and the model's vote on its side"""
     d2 = np.linalg.norm(K[:, c_] - K[:, p_], axis=-1)
     Lb = np.nanpercentile(d2[np.isfinite(d2)], 95)
     if c_ in (7, 8, 9, 10):                                  # an arm bone no longer than 1.15 of what anatomy gives it against the trunk (upper arm 0.186 H,
@@ -246,7 +247,13 @@ for p_, c_ in TREE:
         Lb = min(Lb, 1.15 * (0.186 if c_ in (7, 8) else 0.146) / 0.288 * Lt)
     L_ = Lb / ppm
     dz = np.sqrt(np.maximum(0, Lb ** 2 - d2 ** 2)) / ppm
-    sgn = near_end(Dm[:, c_] - Dm[:, p_], dz, L_)            # the model's vote, by default
+    return L_, dz, near_end(Dm[:, c_] - Dm[:, p_], dz, L_)   # the model's vote, by default
+BEND_W = float(os.environ.get('RMO_BEND_W', 4.0))       # saturates at 4 on the free clips and the kickflip (2: half the phantom bends kept)
+ARM_SIDES = {}                                               # a forearm's side, chosen with its upper arm's (below)
+for p_, c_ in TREE:
+    if c_ in ARM_SIDES:
+        sgn, dz, L_ = ARM_SIDES[c_]; Dep[:, c_] = Dep[:, p_] + sgn * dz; reach[f'{p_}-{c_}'] = round(float(L_), 3); continue
+    L_, dz, sgn = bone_depth(p_, c_)
     far = np.isfinite(dz) & (dz > L_ / 3) & face_ok
     kind = {13: 'hip', 14: 'hip', 15: 'knee', 16: 'knee', 17: 'toe', 18: 'toe', 20: 'toe', 21: 'toe', 19: 'heel', 22: 'heel'}.get(c_)
     if kind is None and A.two_d and c_ in (7, 8, 9, 10): kind = 'arm'   # no model to ask: an arm pointing at the camera reaches forward
@@ -263,22 +270,34 @@ for p_, c_ in TREE:
     elif kind == 'toe': sgn = carry(front, face_ok, sgn)     # the toes in front of the ankle
     elif kind == 'heel': sgn = carry(-front, face_ok, sgn)   # the heel behind it
     elif kind == 'arm': sgn = carry(front, face_ok, sgn)
-    if c_ in (7, 8, 9, 10):                                  # AN ARM NEVER GOES THROUGH THE TRUNK (7 Nov, his word on the MOTION cut: "the hands
-        # are going in body"; a wrist was inside the trunk in 8-25 % of the free clips' frames): of the elbow's or wrist's two depths, where the
-        # one taken lies inside the trunk and the other does not, the other
-        # its side chosen over the whole clip at once (a Viterbi path over the bone's two depths, the standard way to settle a two-way ambiguity
-        # in time): a depth inside the trunk costs 20 a frame, going against the model's vote 1, and a change of side 5, except where the bone
-        # lies in the picture's plane (its depth under a tenth of its length), where the two sides meet. Flipped frame by frame instead, a wrist
-        # grazing the trunk's edge spun the forearm at 4,961-6,675°/s (rule R6)
-        cand = [P3(c_, Dep[:, p_] + s_ * dz) for s_ in (1.0, -1.0)]
-        cost = np.stack([50.0 * in_trunk(cand[0]) + (sgn < 0), 50.0 * in_trunk(cand[1]) + (sgn > 0)], 1)
-        sw = np.where(np.nan_to_num(dz, nan=0.0) < L_ / 10, 0.0, 200.0)
-        acc = cost[0].copy(); back = np.zeros((len(sgn), 2), int)
-        for t in range(1, len(sgn)):
-            move = acc[::-1] + sw[t]; back[t] = np.where(acc <= move, [0, 1], [1, 0]); acc = np.minimum(acc, move) + cost[t]
-        st = np.zeros(len(sgn), int); st[-1] = int(np.argmin(acc))
-        for t in range(len(sgn) - 1, 0, -1): st[t - 1] = back[t, st[t]]
-        new = np.where(st == 0, 1.0, -1.0); ANAT['arm'] += int((new != sgn).sum()); sgn = new
+    if c_ in (7, 8):                                         # THE ARM, ITS TWO BONES' SIDES CHOSEN TOGETHER
+        # AN ARM NEVER GOES THROUGH THE TRUNK (7 Nov, his word on the MOTION cut: "the hands are going in body"; a wrist was inside the trunk in
+        # 8-25 % of the free clips' frames), AND A STRAIGHT ARM STAYS STRAIGHT (7 Nov, cut 2: "the hands are in the wrong position"): each bone
+        # had chosen its side alone, and where the picture showed Mixkit 34382's left arm straight, the upper arm went 29° back and the forearm
+        # 23° forward (a 50° bend no camera would show as a straight line; opposite sides in 76 % of those frames). A bend in 3D whose plane
+        # holds the camera's line of sight is the accident; the generic view is the arm as bent as the picture shows it. So the arm's four
+        # ways (upper arm toward or away from the camera, forearm the same) are chosen over the whole clip at once (a Viterbi path, the standard
+        # way to settle an ambiguity in time): an elbow or a wrist inside the trunk costs 50 a frame, going against the model's vote 1 a bone,
+        # the elbow's bend in 3D BEND_W a radian, and a bone's change of side 200, except where it lies in the picture's plane (its depth under
+        # a tenth of its length), where the two sides meet. Flipped frame by frame instead, a wrist grazing the trunk spun a forearm at
+        # 4,961-6,675°/s (rule R6)
+        w_ = c_ + 2; Lf, dzf, sgnf = bone_depth(c_, w_)
+        if A.two_d: sgnf = carry(front, face_ok, sgnf)
+        S3 = P3(p_, Dep[:, p_]); combos = ((1, 1), (1, -1), (-1, 1), (-1, -1)); cu = np.array([c[0] for c in combos]); cf = np.array([c[1] for c in combos])
+        cost = np.zeros((n, 4))
+        for k, (su, sf) in enumerate(combos):
+            e = P3(c_, Dep[:, p_] + su * dz); w = P3(w_, Dep[:, p_] + su * dz + sf * dzf); a, b = e - S3, w - e
+            bend = np.arccos(np.clip(np.einsum('ij,ij->i', a, b) / np.maximum(np.linalg.norm(a, axis=-1) * np.linalg.norm(b, axis=-1), 1e-9), -1, 1))
+            cost[:, k] = 50.0 * in_trunk(e) + 50.0 * in_trunk(w) + (sgn != su) + (sgnf != sf) + BEND_W * np.nan_to_num(bend)
+        swu = np.where(np.nan_to_num(dz, nan=0.0) < L_ / 10, 0.0, 200.0); swf = np.where(np.nan_to_num(dzf, nan=0.0) < Lf / 10, 0.0, 200.0)
+        acc = cost[0].copy(); back = np.zeros((n, 4), int)
+        for t in range(1, n):
+            trans = acc[:, None] + swu[t] * (cu[:, None] != cu[None, :]) + swf[t] * (cf[:, None] != cf[None, :])   # from row i to column j
+            back[t] = np.argmin(trans, 0); acc = trans.min(0) + cost[t]
+        st = np.zeros(n, int); st[-1] = int(np.argmin(acc))
+        for t in range(n - 1, 0, -1): st[t - 1] = back[t, st[t]]
+        nu, nf = cu[st].astype(float), cf[st].astype(float)
+        ANAT['arm'] += int((nu != sgn).sum() + (nf != sgnf).sum()); sgn = nu; ARM_SIDES[w_] = (nf, dzf, Lf)
     if kind: ANAT[kind] += int(far.sum())
     Dep[:, c_] = Dep[:, p_] + sgn * dz
     reach[f'{p_}-{c_}'] = round(float(L_), 3)
@@ -320,7 +339,7 @@ report.update(px_per_m=round(ppm, 1), scale_from=scale_from, depth_sign=zs,
 Bm = np.full((n, 4), np.nan); Bm[:, 0] = ((board[:, 0] + board[:, 2]) / 2 - np.nanmedian(K[:, [11, 12], 0])) / ppm; Bm[:, 1] = -((board[:, 1] + board[:, 3]) / 2) / ppm
 Bm[:, 2] = (board[:, 2] - board[:, 0]) / ppm; Bm[:, 3] = (board[:, 3] - board[:, 1]) / ppm
 X[..., 1] -= ground; Bm[:, 1] -= ground
-out = {'video': D['video'], 'fps': fps, 'slowmo': slowmo, 'real_fps': fps * slowmo, 'first_frame': D['from'], 'joints': 'COCO-WholeBody 133', 'units': 'metres; x right in the picture, y up from the ground, z toward the camera',
+out = {'video': D['video'], 'size': D['size'], 'fps': fps, 'slowmo': slowmo, 'real_fps': fps * slowmo, 'first_frame': D['from'], 'joints': 'COCO-WholeBody 133', 'units': 'metres; x right in the picture, y up from the ground, z toward the camera',
        'report': report, 'bones_m': lens,
        'X': np.round(X, 4).tolist(),                     # NaN where a joint was never seen near (read with Python's json: it keeps NaN)
        'board': np.round(np.nan_to_num(Bm, nan=0.0), 4).tolist(), 'board_seen': np.isfinite(Bm[:, 0]).astype(int).tolist(), 'air': air.astype(int).tolist()}

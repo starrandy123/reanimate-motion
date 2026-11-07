@@ -14,6 +14,8 @@ turns it red: a check that cannot fail is no check.
                                                                                       plant: the wrists put in the trunk's middle for a tenth of the clip
   R10 TWIST   the chest turns no more than 45° against the pelvis in 98 % of frames (the spine: White & Panjabi)
                                                                                       plant: the shoulder line turned 90° for a third of the clip
+  R11 PLACED  the skeleton's shoulders within 3 cm and its wrists within 6 cm of the tracked ones (medians) plant: the spine leaning 20° off
+  R12 STRAIGHT where the picture shows an arm straight, its 3D elbow bends 20° or less (median)   plant: each forearm's depth mirrored
                                                                                       plant: the board taken whatever leg it implies (before 7 Nov)"""
 import sys, os, json, copy, subprocess
 import numpy as np
@@ -129,10 +131,99 @@ def p10(X):
     X = X.copy(); n = len(X); k = np.arange(n // 3, 2 * n // 3)          # the shoulder line turned 90° about the trunk's middle (a line flat in the
     m = (X[k, 5] + X[k, 6]) / 2; h = (X[k, 5] - X[k, 6]) / 2             # picture: swapping its two depths turned nothing)
     r = np.stack([-h[:, 2], h[:, 1], h[:, 0]], -1); X[k, 5] = m + r; X[k, 6] = m - r; return X
+def r11(Wd):
+    """THE ARMS START WHERE THE RIDER'S DO: the written skeleton's shoulder joints within 3 cm of the tracked shoulders and its wrists within
+    6 cm of the tracked wrists (medians). The spine had aimed off the trunk and put them 6-16 cm away (7 Nov, cut 2: "the hands are in the
+    wrong position")"""
+    pos = fk(M, Wd); X0 = X[M['clip_from']:M['clip_to']]; t0 = np.arange(len(X0)) / M['video_per_real_second']; t = np.arange(M['frames']) / M['fps']
+    J = lambda j: np.stack([np.interp(t, t0, X0[:, j, c]) for c in range(3)], -1)
+    e = lambda b, j: 100 * float(np.nanmedian(np.linalg.norm(pos[b] - J(j), axis=-1)))
+    sh, wr = max(e('LeftArm', 5), e('RightArm', 6)), max(e('LeftHand', 9), e('RightHand', 10))
+    return sh <= 3 and wr <= 6, f'the shoulders {sh:.1f} cm and the wrists {wr:.1f} cm from the tracked ones (medians, the worse side)'
+def p11(Wd):
+    Wd = copy.deepcopy(Wd); tilt = Rot.from_euler('x', 20, degrees=True)                       # the whole spine leaning 20° off the trunk's line
+    for b in ('Spine', 'Spine1', 'Spine2'): Wd[b] = (tilt * Rot.from_quat(np.array(Wd[b]))).as_quat().tolist()
+    return Wd
+def r12(X):
+    """A STRAIGHT ARM STAYS STRAIGHT: where the picture shows an arm straight (its elbow bent under 15° in the picture), the 3D elbow's median
+    bend there is 20° or less (each arm with 20 such frames or more). Each bone had chosen its depth's side alone, and Mixkit 34382's left
+    arm bent 51° (median) where the video shows it straight"""
+    worst, say = 0.0, []
+    for a, b, c in ((5, 7, 9), (6, 8, 10)):
+        u2, f2 = Kp[:, b] - Kp[:, a], Kp[:, c] - Kp[:, b]
+        b2 = np.degrees(np.arccos(np.clip((u2 * f2).sum(-1) / (np.linalg.norm(u2, axis=-1) * np.linalg.norm(f2, axis=-1) + 1e-9), -1, 1)))
+        up, fo = X[:, b] - X[:, a], X[:, c] - X[:, b]
+        b3 = np.degrees(np.arccos(np.clip((up * fo).sum(-1) / (np.linalg.norm(up, axis=-1) * np.linalg.norm(fo, axis=-1) + 1e-9), -1, 1)))
+        st = (b2 < 15) & np.isfinite(b3)
+        if st.sum() >= 20: m = float(np.median(b3[st])); worst = max(worst, m); say.append(f"{'left' if a == 5 else 'right'} {m:.0f}° over {int(st.sum())}")
+    if not say: return None, 'no arm straight in the picture in 20 frames: not read'
+    return worst <= 20, 'the 3D elbow where the picture shows the arm straight: ' + ', '.join(say)
+def p12(X):
+    X = X.copy()
+    for e, w in ((7, 9), (8, 10)): X[:, w, 2] = 2 * X[:, e, 2] - X[:, w, 2]                    # each forearm's depth on the other side of its elbow
+    return X
+Kp = np.array([r['k'] if 'k' in r else [[np.nan, np.nan]] * 133 for r in T['frames']], float)   # the picture, as tracked
+CHAR = opt('--character', os.path.join(HERE, '..', 'examples', 'models', 'street-skater.glb')); HIDE = [opt('--hide')] if opt('--hide') else []
+FITTED = os.path.join(W, 'solve', 'motion_' + os.path.splitext(os.path.basename(CHAR))[0] + '.json')
+def r13(plant=False):
+    """THE CHARACTER'S HANDS NEVER GO THROUGH ITS BODY (7 Nov, Randy: "The hands shouldn't move through the body either"): read on the
+    character itself, with the motion rmo fit wrote for it. Each body part (the vertices its bone moves most: hips, spine, chest, neck,
+    head, thighs) is its convex hull at rest; each frame every vertex of both hands and forearms, posed as web/retarget.js poses it, is
+    taken into each part's rest frame; a frame fails when 5 or more are inside one. The fit's own bodies are elliptic cylinders: this
+    check is the mesh's hull, so a fit that is too small is caught. Plant: the left wrist driven into the chest's middle for a tenth
+    of the clip (two-bone IK)"""
+    if not os.path.exists(FITTED): return None, f'no motion fitted to {os.path.basename(CHAR)} (rmo fit): not read'
+    sys.path.insert(0, os.path.join(HERE, '..', 'mocap')); from character import Character; from scipy.spatial import Delaunay; import fit as FIT
+    Ch = Character(CHAR, hide=HIDE); Mf = json.load(open(FITTED)); W0 = {i: Ch.world[i] for i in range(len(Ch.names))}
+    hull, arms = {}, []
+    for part in Ch.parts:
+        V = Ch.skin(W0, part)
+        for b in FIT.BODY:
+            m = part['dom'] == Ch.bone.get(b, -1)
+            if m.any(): hull.setdefault(b, []).append(V[m])
+        sub = np.isin(part['dom'], [Ch.bone[s + k] for s in ('Left', 'Right') for k in ('Hand', 'ForeArm')])
+        if sub.any(): arms.append({kk: (v[sub] if isinstance(v, np.ndarray) and len(v) == len(part['P']) else v) for kk, v in part.items()})
+    hull = {b: Delaunay(np.concatenate(v)) for b, v in hull.items() if sum(len(x) for x in v) >= 12}
+    n = Mf['frames']; bad = 0; plant_at = set(range(n // 3, n // 3 + max(2, n // 10))) if plant else set()
+    for f in range(n):
+        Wp = Ch.pose(Mf, f)
+        if f in plant_at:                                                                          # the wrist into the chest's middle
+            S_, E_, Wr = (Wp[Ch.bone['Left' + b]][:3, 3] for b in ('Arm', 'ForeArm', 'Hand'))
+            E2, W2 = FIT.two_bone(S_, E_, Wr, Wp[Ch.bone['Spine1']][:3, 3]); Mp = dict(Mf); Mp['world'] = dict(Mf['world'])
+            for bone, old, new in (('LeftArm', E_ - S_, E2 - S_), ('LeftForeArm', Wr - E_, W2 - E2)):
+                q = list(Mp['world'][bone]); q[f] = list(Rot.from_matrix(FIT.swing(old, new) @ Rot.from_quat(q[f]).as_matrix()).as_quat()); Mp['world'][bone] = q
+            Wp = Ch.pose(Mp, f)
+        P = np.concatenate([Ch.skin(Wp, a) for a in arms]); Ph = np.c_[P, np.ones(len(P))].T
+        for b, h in hull.items():
+            i = Ch.bone[b]; Q = (Ch.world[i] @ np.linalg.solve(Wp[i], Ph)).T[:, :3]
+            if (h.find_simplex(Q) >= 0).sum() >= 5: bad += 1; break
+    return bad == 0, f'the hands or forearms of {os.path.basename(CHAR)} inside its body in {bad} of {n} frames'
+def r14(plant=False):
+    """THE HEAD TURNS WHERE THE FACE TURNS (7 Nov: "The head must turn to the back too when the characters' head turns"): where the picture
+    shows the face to one side of the head (from the ear the model is sure of, or the ears' middle, to the eyes' middle, a direction more
+    than 60 % sideways: a face in profile lies forward of its ear), the character's head (the motion it plays) faces that side in 90 % of
+    those frames or more. Read from the picture alone, not from the solve's own fit of the face (the nose against the eyes was tried and
+    read a profile looking down as turned the other way: frame 125 of Mixkit 34382). Plant: the head turned the other way (mirrored)"""
+    Mm = json.load(open(FITTED)) if os.path.exists(FITTED) else M
+    k = Kp; sc = np.array([r['s'] if 's' in r else [0] * 133 for r in T['frames']], float)
+    eyes = (k[:, 1] + k[:, 2]) / 2; s3, s4 = sc[:, 3] > 0.5, sc[:, 4] > 0.5
+    ear = np.where((s3 & s4)[:, None], (k[:, 3] + k[:, 4]) / 2, np.where(s3[:, None], k[:, 3], k[:, 4]))
+    v = eyes - ear; L = np.linalg.norm(v, axis=-1); side = v[:, 0] / np.maximum(L, 1e-6)
+    ok = (sc[:, [1, 2]] > 0.5).all(1) & (s3 | s4) & (L > 4) & (np.abs(side) > 0.6)
+    real = Mm['video_per_real_second']; a0 = Mm['clip_from'] or 0
+    idx = np.clip(np.round((np.arange(len(k)) - a0) / real * Mm['fps']).astype(int), 0, Mm['frames'] - 1); ok &= np.arange(len(k)) >= a0
+    if ok.sum() < 10: return None, f'the face to one side in {int(ok.sum())} frames: not read'
+    head = Rot.from_quat(np.array(Mm['world']['Head'])).apply([0, 0, 1.0])[idx]                     # where the head faces (x: the picture's right)
+    hx = -head[:, 0] if plant else head[:, 0]
+    agree = float((np.sign(hx[ok]) == np.sign(side[ok])).mean())
+    return agree >= 0.9, f'the head faces the side the face is on in {100 * agree:.0f}% of {int(ok.sum())} frames'
 RULES = [('R1 TRACKED', lambda: r1(T), lambda: r1(p1(T))), ('R2 RIGID', lambda: r2(X), lambda: r2(p2(X))), ('R3 ANATOMY', lambda: r3(XW), lambda: r3(p3(XW))),
          ('R4 CLOCK', lambda: r4(9.81), lambda: r4(9.81 / 2)), ('R5 SOLVED', lambda: r5(M['world']), lambda: r5(p5(M['world']))),
-         ('R6 SMOOTH', lambda: r6(M['world']), lambda: r6(p6(M['world']))), ('R7 HOSTS', lambda: r7(False), lambda: r7(True)),
-         ('R8 SCALE', lambda: r8(False), lambda: r8(True)), ('R9 HANDS', lambda: r9(X), lambda: r9(p9(X))), ('R10 TWIST', lambda: r10(X), lambda: r10(p10(X)))]
+         ('R6 SMOOTH', lambda: r6(M['world']), lambda: r6(p6(M['world']))),
+         ('R6 FITTED', lambda: r6(json.load(open(FITTED))['world']) if os.path.exists(FITTED) else (None, 'no fitted motion: not read'), lambda: r6(p6(json.load(open(FITTED))['world'])) if os.path.exists(FITTED) else (None, '')), ('R7 HOSTS', lambda: r7(False), lambda: r7(True)),
+         ('R8 SCALE', lambda: r8(False), lambda: r8(True)), ('R9 HANDS', lambda: r9(X), lambda: r9(p9(X))), ('R10 TWIST', lambda: r10(X), lambda: r10(p10(X))),
+         ('R11 PLACED', lambda: r11(M['world']), lambda: r11(p11(M['world']))), ('R12 STRAIGHT', lambda: r12(X), lambda: r12(p12(X))),
+         ('R13 CLEAR', lambda: r13(False), lambda: r13(True)), ('R14 HEAD', lambda: r14(False), lambda: r14(True))]
 held = True
 for name, real, plant in RULES:
     ok, say = real(); pok, psay = plant()

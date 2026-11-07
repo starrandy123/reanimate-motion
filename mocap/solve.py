@@ -68,7 +68,25 @@ L = {'thigh': (med(P('Lknee') - P('Lhip')) + med(P('Rknee') - P('Rhip'))) / 2, '
 # the world frames of the trunk and head
 x_hips = P('Lhip') - P('Rhip'); up = fillv(P('chest') - P('hips'))
 Mhips = frame_from(x_hips, up, 'Hips'); Mhips[:, :, 2] = np.cross(Mhips[:, :, 0], Mhips[:, :, 1])        # the hip line exact (x, his left), up made square to it, z forward
-Mchest = frame_from(P('Lshoulder') - P('Rshoulder'), up, 'Spine2'); Mchest[:, :, 2] = np.cross(Mchest[:, :, 0], Mchest[:, :, 1])
+# THE SPINE REACHES THE SHOULDERS (7 Nov, his word on MOTION cut 2: "the hands are in the wrong position" · "the body twisting with the
+# hands too in the tricks"). The spine's up was the trunk made square to the hip line and to the shoulder line, and the lines the depth
+# step gives are 11-17° (median) off square with the trunk where the picture's own are 4-7°: the chain put the shoulders 6-16 cm (median,
+# up to 52) from the tracked ones, and the arms, exact in direction, hung from there. Now, as a keypoint-to-skeleton solve does (each bone
+# aims at its child joint: KevinLTT/video2bvh's bvh_skeleton, MIT), the three spine bones aim from the spine's root at the tracked
+# mid-shoulder, their turn about that line shared between the hip line and the shoulder line (each made square to it: the yaw only, 1/3
+# 2/3 1), and what the shoulder line tilts against the trunk (a shrug: one shoulder up) goes to the clavicles, below
+tr = L['trunk']
+p_sp = fillv(P('hips')) + 0.10 * tr * Mhips[:, :, 1]                                       # the spine's root: the Spine joint
+us = nz(fillv(P('chest') - p_sp, 'Spine2'))                                                # the spine's line, to the tracked mid-shoulder (a gap is
+# filled as the line, carried with the hips: a chest out of the picture filled where it was swung the spine 90° as the hips rose)
+def square(v):
+    v = fillv(v); v = v - (v * us).sum(-1, keepdims=True) * us; return nz(v)
+xh_s, xs_s = square(x_hips), square(P('Lshoulder') - P('Rshoulder'))
+psi = np.unwrap(np.arctan2((np.cross(xh_s, xs_s) * us).sum(-1), (xh_s * xs_s).sum(-1)))   # the shoulders' turn from the hips' about the spine
+def spine_frame(f):
+    a = (psi * f)[:, None]; x = nz(xh_s * np.cos(a) + np.cross(us, xh_s) * np.sin(a))    # Rodrigues (xh_s is square to us)
+    return np.stack([x, us, np.cross(x, us)], -1)
+Mchest = spine_frame(1.0)
 # THE HEAD (7 Nov, his word on the MOTION cut: "the character is flailing in the head"). Its line across was the ears', and ears hidden,
 # swapped or out of the frame flipped it between frames: the head turned 8,627°/s of real time on Mixkit 34382 (rule R6 reads it now on the
 # free clips). A head turns at most about 80° either way of the chest, bends about 50° forward and 60° back, and 45° to a side (the cervical
@@ -78,6 +96,25 @@ Mchest = frame_from(P('Lshoulder') - P('Rshoulder'), up, 'Spine2'); Mchest[:, :,
 ear = X[:, 3] - X[:, 4]
 ear[np.nan_to_num(np.einsum('ij,ij->i', ear, Mchest[:, :, 0])) < 0] *= -1
 Mhead = frame_from(P('head') - P('chest'), ear, 'Head')[:, :, [1, 0, 2]]; Mhead[:, :, 2] = np.cross(Mhead[:, :, 0], Mhead[:, :, 1])
+# THE HEAD BY ITS FACE (7 Nov: "The head must turn to the back too when the characters' head turns"). The ears' line takes its turn in
+# depth from the model, whose depth runs compressed, and a face in profile hides an ear: Mixkit 488's dancer whipped her head down and round
+# and the character's stayed facing the camera. Where the face is seen, its turn is measured the standard way, a generic 3D face fitted to
+# the picture's face points by OpenCV's solvePnP (the nose tip, the chin, the eyes' and the mouth's outer corners of the 68-point face:
+# LearnOpenCV, "Head Pose Estimation using OpenCV and Dlib"; the camera's focal length the picture's width, as there; solved by SQPnP, Terzakis &
+# Lourakis, ECCV 2020, in OpenCV). Elsewhere the ears'.
+import cv2
+FACE3D = np.array([[0, 0, 0], [0, -330, -65], [-225, 170, -135], [225, 170, -135], [-150, -150, -125], [150, -150, -125]], float)
+FIDX = [23 + 30, 23 + 8, 23 + 36, 23 + 45, 23 + 48, 23 + 54]                                   # those six in COCO-WholeBody's face (23-90)
+_ppm = D['report']['px_per_m']; _f = float(D.get('size', [1920, 1080])[0]) if 'size' in D else 1920.0
+_cam = np.array([[_f, 0, 0], [0, _f, 0], [0, 0, 1.0]]); _C = np.diag([1.0, -1.0, -1.0]); _rv = _tv = None; face_seen = np.zeros(n, bool)
+for t in range(n):
+    q = np.stack([X[t, FIDX, 0] * _ppm, -X[t, FIDX, 1] * _ppm], -1)                          # back to the picture's pixels (y down)
+    if not np.isfinite(q).all(): _rv = _tv = None; continue
+    q = q - q.mean(0)
+    ok, _rv, _tv = cv2.solvePnP(FACE3D, q, _cam, None, flags=cv2.SOLVEPNP_SQPNP)              # the global optimum, fresh each frame (seeded by the
+    # last frame, the local solver carried a face turned the wrong way through 15 frames of Mixkit 49634)
+    if ok and _tv[2, 0] > 0: Mhead[t] = _C @ cv2.Rodrigues(_rv)[0]; face_seen[t] = True        # the face's turn in our frame (x right, y up, z to the camera)
+    else: _rv = _tv = None
 from scipy.signal import medfilt as _medfilt, butter as _bw, filtfilt as _ff
 HEAD_RANGE = np.radians([[-80, 80], [-50, 50], [-45, 45]])     # yaw (about the chest's up), pitch (about its side; 50 the lesser of 50/60), roll
 _e = Rot.from_matrix(np.einsum('nji,njk->nik', Mchest, Mhead)).as_euler('YXZ')
@@ -86,24 +123,40 @@ for _k in range(3):
     if _ok.sum() >= 2: _v = np.interp(np.arange(n), np.flatnonzero(_ok), _v[_ok])
     _v = np.clip(np.unwrap(np.nan_to_num(_v)), *HEAD_RANGE[_k])
     if n >= 9:
-        _v = _medfilt(_v, 5); _b, _a = _bw(2, min(0.99, 3.0 / (A.fps / 2))); _v = _ff(_b, _a, _v)
+        _v = _medfilt(_v, 5); _b, _a = _bw(2, min(0.99, 6.0 / (A.fps / 2))); _v = _ff(_b, _a, _v)   # 6 Hz: a head whipped round in a dance kept
     _e[:, _k] = np.clip(_v, *HEAD_RANGE[_k])
 # where the face is not seen (the nose or an ear out of the picture or hidden: Mixkit 34382's last third, 12-27 % of its frames) its turn is a
 # guess over bridged points, and the head tipped 45° there: it follows the chest instead, weighted by how much of the face the last quarter
 # second saw
-_vis = np.isfinite(X[:, [0, 3, 4], 0]).all(1).astype(float); _w = max(1, int(round(0.25 * A.fps)))
+_vis = (face_seen | np.isfinite(X[:, [0, 3, 4], 0]).all(1)).astype(float); _w = max(1, int(round(0.25 * A.fps)))   # a profile hides an ear, not the face
 _vis = np.convolve(np.pad(_vis, _w // 2, mode='edge'), np.ones(_w) / _w, 'same')[_w // 2: _w // 2 + n]
 _e = _e * _vis[:, None]
 Mhead = np.einsum('nij,njk->nik', Mchest, Rot.from_euler('YXZ', _e).as_matrix())
 I3 = np.eye(3)
-W = {'Hips': Mhips, 'Spine2': Mchest, 'Head': Mhead}                                       # rest frames are the identity
+W = {'Hips': Mhips, 'Spine2': Mchest, 'Head': Mhead, 'Spine': spine_frame(1 / 3), 'Spine1': spine_frame(2 / 3)}   # rest frames are the identity
 qs = lambda M: Rot.from_matrix(M)
-for name, f in (('Spine', 1 / 3), ('Spine1', 2 / 3)):
-    W[name] = np.stack([Slerp([0, 1], qs(np.stack([Mhips[t], Mchest[t]])))(f).as_matrix() for t in range(n)])
 W['Neck'] = np.stack([Slerp([0, 1], qs(np.stack([Mchest[t], Mhead[t]])))(0.5).as_matrix() for t in range(n)])
+# THE CLAVICLES: each aims its arm's root at the tracked shoulder, inside the sternoclavicular joint's range (elevation 45°, depression
+# 10°: Physio-Pedia, "Sternoclavicular Joint"; protraction and retraction about 15° each, 35° in all by GPnotebook's table), its two angles
+# taken out of their spikes and low-passed at 6 Hz of real time like the limbs' twist
+from scipy.signal import medfilt as _mf, butter as _bt, filtfilt as _flt
+CLAV = {'up': (-10, 45), 'fwd': (-15, 15)}
+sp2 = p_sp + 0.5 * tr * us                                                                  # Spine2's joint (Spine and Spine1 lie along us)
+for s, sx in (('L', 1.0), ('R', -1.0)):
+    side = 'Left' if s == 'L' else 'Right'
+    o = np.array([sx * (L['shhalf'] - 0.02), 0.04 * tr, 0.0])                             # the clavicle's offset to the arm (the skeleton below)
+    root_c = sp2 + np.einsum('nij,j->ni', Mchest, np.array([sx * 0.02, 0.36 * tr, 0.0]))
+    d_l = fillv(np.einsum('nji,nj->ni', Mchest, P(s + 'shoulder') - root_c))               # the tracked shoulder in the chest's frame (a gap filled there)
+    el = np.arctan2(d_l[:, 1], sx * d_l[:, 0]) - np.arctan2(o[1], sx * o[0]); pr = np.arctan2(d_l[:, 2], sx * d_l[:, 0])
+    ang = []
+    for v, (lo, hi) in ((el, CLAV['up']), (pr, CLAV['fwd'])):
+        v = np.clip(np.unwrap(np.nan_to_num(v)), *np.radians([lo, hi]))
+        if n >= 9: v = _mf(v, 5); b_, a_ = _bt(2, min(0.99, 6.0 / (A.fps / 2))); v = np.clip(_flt(b_, a_, v), *np.radians([lo, hi]))
+        ang.append(v)
+    loc = Rot.from_euler('y', (-sx * ang[1])[:, None]) * Rot.from_euler('z', (sx * ang[0])[:, None])            # forward about the chest's up, then up about its forward
+    W[side + 'Shoulder'] = np.einsum('nij,njk->nik', Mchest, loc.as_matrix())
 REST = {}
 for s, sx in (('L', 1.0), ('R', -1.0)):
-    W[('Left' if s == 'L' else 'Right') + 'Shoulder'] = Mchest
     side = 'Left' if s == 'L' else 'Right'
     # the arm: aims at the elbow; twist from the bend toward the wrist (rest: the forearm bends forward, +Z)
     fwd = Mchest[:, :, 2] * 0.3 * L['fore']                                                 # a straight arm has no bend plane: the chest's forward steadies it
