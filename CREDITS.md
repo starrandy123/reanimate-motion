@@ -13,6 +13,12 @@ The kit's own code is MIT (LICENSE). What it runs or learned from:
 | C. J. Taylor, CVPR 2000 | depth from known bone lengths under a scaled-orthographic camera | paper | "Reconstruction of articulated objects from point correspondences in a single uncalibrated image" |
 | D. A. Winter, *Biomechanics and Motor Control of Human Movement* (2009), table 4.1 (Dempster) | segment masses and centres for the gravity clock | book | |
 | NVIDIA GEM-X | the reference pipeline this kit learns from (contacts and IK, the camera from the background) — not bundled | Apache-2.0 code; weights NVIDIA Open Model Licence (commercial use) | github.com/NVlabs/GEM-X |
+| OpenCV solvePnP (SQPnP) | the head's turn from the face points: a generic 3D face fitted to the picture | Apache-2.0 | opencv.org; G. Terzakis & M. Lourakis, "A Consistently Fast and Globally Optimal Solution to the Perspective-n-Point Problem", ECCV 2020 |
+| LearnOpenCV, "Head Pose Estimation using OpenCV and Dlib" | the generic 6-point 3D face (nose tip, chin, eye and mouth corners) and the focal length taken as the picture's width — numbers, no code copied | article | learnopencv.com |
+| Unreal Engine IK Retargeter (Epic) | the idea of `rmo fit`: hand goals moved out of the target's body colliders (its "Body Intersect Goals" op) and placed toward the source's hands ("Blend to Source"); bodies fitted to a bone's dominant-weight vertices as Unreal's physics-asset tool does — from Epic's documentation, no code | docs | dev.epicgames.com (IK Retargeter, retargeting operation stack) |
+| KevinLTT/video2bvh | keypoints to BVH: each bone aims at its child joint — the method, no code copied | MIT | github.com/KevinLTT/video2bvh |
+| Physio-Pedia, "Sternoclavicular Joint"; GPnotebook | the clavicle's range (up 45°, down 10°, forward and back about 15°) | articles | physio-pedia.com |
+| White & Panjabi, *Clinical Biomechanics of the Spine* (1990); AAOS, *Joint Motion* (1965); Youdas et al., *Phys Ther* 72(11) 1992 | the spine's twist and the neck's range | books / paper | |
 | three.js r183 | the web example and retarget.js | MIT | threejs.org |
 | Blender | the Blender example (bpy) | GPL (the tool); the script is MIT | blender.org |
 | Polyfork "Street Skater" | the example character (examples/models/street-skater.glb) | CC BY 4.0 — credit Polyfork, polyfork.dev | polyfork.dev |

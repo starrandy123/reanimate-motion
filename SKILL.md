@@ -15,6 +15,10 @@ description: Copy a body's motion from a video onto a character (Mixamo, Blender
 5. `./rmo solve <work>/clean.json <work>/solve --from F --to F` with the frames of the move; read `fk_error_cm` and `unseen_share`.
 6. `./rmo check <work>` — every rule must HOLD, and every plant must go red. A red rule is a defect to fix at its source, never a
    bound to move.
-7. Show it: `./rmo view <work>/solve <out>` and `tests/sheet.py` (the video above, the character below, front and side).
-8. Put it on the character: `./rmo blender …` or `web/retarget.js`; for Blender, `./rmo check <work> --baked <out.glb>` proves the
+7. **Fit it to YOUR character:** `./rmo fit <work> --character <your.glb> [--hide <prop node>]` -> `solve/motion_<name>.json`. Its hands
+   go where the rider's are against the body (scaled to its own reach) and never through its own body (its body read from its own mesh);
+   `./rmo check <work> --character <your.glb>` reads R13 on that mesh. Use the fitted file wherever the motion goes on that character.
+8. Watch it, at full speed, beside the source: `./rmo film <work> --video <video> --motion motion_<name>.json` -> `film/side.mp4`. A sheet of
+   stills hides what moves wrong between them (a hand through the chest, a head that does not turn); look at the frames in order too.
+9. Put it on the character: `./rmo blender …` or `web/retarget.js`; for Blender, `./rmo check <work> --baked <out.glb>` proves the
    two hosts agree.
