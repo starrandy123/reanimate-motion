@@ -119,6 +119,13 @@ for s, sx in (('L', 1.0), ('R', -1.0)):
                 a = P(s + f'h{base + k + 1}') - P(s + f'h{base + k}')
                 rest_dir = [sx, 0, 0.6] if fname == 'Thumb' else [sx, 0, 0]
                 W[f'{side}Hand{fname}{k + 1}'] = delta(frame_from(a, knuck), rest_frame(rest_dir, [0, 0, 1] if fname != 'Thumb' else [-sx, 0, 1]))
+    else:
+        # THE PALMS (7 Nov, his word on the MOTION cut: "The hands and palms in the wrong position too"). Hands 35-65 px tall cannot be read,
+        # and the hand had copied the forearm's twist (the elbow's bend plane): the palms faced anywhere. A hand that cannot be seen is held in
+        # the forearm's neutral turn, the palm toward the trunk's middle line, as a relaxed arm holds it (the T-pose rest: palms down), its
+        # twist low-passed like the other bones' (below)
+        palm = fillv((P('chest') + P('hips')) / 2 - P(s + 'wrist'))
+        W[side + 'Hand'] = delta(frame_from(fo_, palm, side + 'Hand'), rest_frame([sx, 0, 0], [0, -1, 0]))
     # the leg: aims at the knee; twist from the shin's bend (rest: a bent knee sends the shin back, -Z)
     W[side + 'UpLeg'] = delta(frame_from(fillv(P(s + 'knee') - P(s + 'hip'), side + 'UpLeg'), P(s + 'ankle') - P(s + 'knee') - (P(s + 'toe') - P(s + 'heel')) * 0.05), rest_frame([0, -1, 0], [0, 0, -1]))
     # the shin twists with the knee's hinge: its reference is the thigh's direction (square to the shin it points forward); the foot's line
@@ -147,7 +154,7 @@ def smooth_twist(Wb, a0):
     return (swing * Rot.from_rotvec(np.outer(th, a0))).as_matrix()
 for side, sx in (('Left', 1.0), ('Right', -1.0)):
     foot_rest = np.array([0, -(L['ankle_h'] - 0.02), 0.7 * L['foot'] - 0.05])
-    for bone, a0 in (('Arm', [sx, 0, 0]), ('ForeArm', [sx, 0, 0]), ('UpLeg', [0, -1, 0]), ('Leg', [0, -1, 0]), ('Foot', foot_rest), ('ToeBase', [0, 0, 1])):
+    for bone, a0 in (('Arm', [sx, 0, 0]), ('ForeArm', [sx, 0, 0]), ('Hand', [sx, 0, 0]), ('UpLeg', [0, -1, 0]), ('Leg', [0, -1, 0]), ('Foot', foot_rest), ('ToeBase', [0, 0, 1])):
         W[side + bone] = smooth_twist(W[side + bone], a0)
 
 # the skeleton (Mixamo's names and hierarchy) in its T-pose with this rider's lengths

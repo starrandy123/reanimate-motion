@@ -12,6 +12,8 @@ turns it red: a check that cannot fail is no check.
   R8 SCALE    the rider's leg is a person's (0.60-1.15 m), and a shoe the detector calls a board in 31 frames does not set the scale
   R9 HANDS    no wrist inside the trunk in more than 2 % of frames (7 Nov: "the hands are going in body")
                                                                                       plant: the wrists put in the trunk's middle for a tenth of the clip
+  R10 TWIST   the chest turns no more than 45° against the pelvis in 98 % of frames (the spine: White & Panjabi)
+                                                                                      plant: the shoulder line turned 90° for a third of the clip
                                                                                       plant: the board taken whatever leg it implies (before 7 Nov)"""
 import sys, os, json, copy, subprocess
 import numpy as np
@@ -115,10 +117,22 @@ def r9(X):
 def p9(X):
     X = X.copy(); n = len(X); k = np.arange(n // 3, n // 3 + n // 10); mid = (X[k, 5] + X[k, 6] + X[k, 11] + X[k, 12]) / 4
     X[k, 9] = mid; X[k, 10] = mid; return X
+def twist_pct(X):
+    up = (X[:, 5] + X[:, 6]) / 2 - (X[:, 11] + X[:, 12]) / 2; upn = up / np.linalg.norm(up, axis=-1, keepdims=True)
+    def flat(v): v = v - np.einsum('ij,ij->i', v, upn)[:, None] * upn; return v / np.linalg.norm(v, axis=-1, keepdims=True)
+    a, b = flat(X[:, 11] - X[:, 12]), flat(X[:, 5] - X[:, 6])
+    ang = np.degrees(np.abs(np.arctan2(np.einsum('ij,ij->i', np.cross(a, b), upn), np.einsum('ij,ij->i', a, b))))
+    return 100 * float(np.nanmean(ang > 45))
+def r10(X):
+    v = twist_pct(X); return v <= 2.0, f'the chest turned past 45° against the pelvis in {v:.1f}% of frames'
+def p10(X):
+    X = X.copy(); n = len(X); k = np.arange(n // 3, 2 * n // 3)          # the shoulder line turned 90° about the trunk's middle (a line flat in the
+    m = (X[k, 5] + X[k, 6]) / 2; h = (X[k, 5] - X[k, 6]) / 2             # picture: swapping its two depths turned nothing)
+    r = np.stack([-h[:, 2], h[:, 1], h[:, 0]], -1); X[k, 5] = m + r; X[k, 6] = m - r; return X
 RULES = [('R1 TRACKED', lambda: r1(T), lambda: r1(p1(T))), ('R2 RIGID', lambda: r2(X), lambda: r2(p2(X))), ('R3 ANATOMY', lambda: r3(XW), lambda: r3(p3(XW))),
          ('R4 CLOCK', lambda: r4(9.81), lambda: r4(9.81 / 2)), ('R5 SOLVED', lambda: r5(M['world']), lambda: r5(p5(M['world']))),
          ('R6 SMOOTH', lambda: r6(M['world']), lambda: r6(p6(M['world']))), ('R7 HOSTS', lambda: r7(False), lambda: r7(True)),
-         ('R8 SCALE', lambda: r8(False), lambda: r8(True)), ('R9 HANDS', lambda: r9(X), lambda: r9(p9(X)))]
+         ('R8 SCALE', lambda: r8(False), lambda: r8(True)), ('R9 HANDS', lambda: r9(X), lambda: r9(p9(X))), ('R10 TWIST', lambda: r10(X), lambda: r10(p10(X)))]
 held = True
 for name, real, plant in RULES:
     ok, say = real(); pok, psay = plant()

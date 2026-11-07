@@ -200,12 +200,34 @@ def carry(rule, sure, fallback):
 msh = (K[:, 5] + K[:, 6]) / 2; mhp = (K[:, 11] + K[:, 12]) / 2; d2t = np.linalg.norm(msh - mhp, axis=-1); Lt = np.nanpercentile(d2t[np.isfinite(d2t)], 95)
 dzt = np.sqrt(np.maximum(0, Lt ** 2 - d2t ** 2)) / ppm; trunk_dep = carry(front, face_ok, np.ones(n)) * dzt
 reach = {}
+P3 = lambda j, dep: np.stack([K[:, j, 0] / ppm, -K[:, j, 1] / ppm, zs * dep], -1)
 for a_, b_ in ((11, 12), (5, 6)):                         # the pelvis and the shoulders are rigid lines too, about their middles
     d2 = np.linalg.norm(K[:, a_] - K[:, b_], axis=-1); Lb = np.nanpercentile(d2[np.isfinite(d2)], 95)
     dz = np.sqrt(np.maximum(0, Lb ** 2 - d2 ** 2)) / ppm; sgn = near_end(Dm[:, a_] - Dm[:, b_], dz, Lb / ppm)
     c = 0.0 if a_ == 11 else trunk_dep
+    if a_ == 5:
+        # THE SPINE TWISTS ABOUT 40° EACH WAY (7 Nov, his word on the MOTION cut: "the body twisting with the hands too in the tricks"; the thoracic
+        # spine turns about 35° and the lumbar about 5° to a side: White & Panjabi, Clinical Biomechanics of the Spine, 1990). Taken from the
+        # model's vote, the chest turned more than 45° against the pelvis in 37 % of Mixkit 34382's frames and 62 % of 488's. The shoulder line's
+        # side is chosen over the whole clip (a Viterbi path, as the arms'): a twist past 45° costs 50 a frame and more with its excess, the
+        # vote 1, a change of side 200 except where the line lies in the picture's plane
+        upn = (np.stack([(K[:, 5, 0] + K[:, 6, 0]) - (K[:, 11, 0] + K[:, 12, 0]), -((K[:, 5, 1] + K[:, 6, 1]) - (K[:, 11, 1] + K[:, 12, 1])), np.zeros(n)], -1) / 2) / ppm
+        upn = upn / np.maximum(np.linalg.norm(upn, axis=-1, keepdims=True), 1e-9)
+        hipv = P3(11, Dep[:, 11]) - P3(12, Dep[:, 12])
+        def flat(v):
+            v = v - np.einsum('ij,ij->i', v, upn)[:, None] * upn; return v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-9)
+        tw = []
+        for s_ in (1.0, -1.0):
+            shv = P3(5, c + s_ * dz / 2) - P3(6, c - s_ * dz / 2); a1, b1 = flat(hipv), flat(shv)
+            tw.append(np.degrees(np.abs(np.arctan2(np.einsum('ij,ij->i', np.cross(a1, b1), upn), np.einsum('ij,ij->i', a1, b1)))))
+        cost = np.stack([np.nan_to_num(np.where(tw[0] > 45, 50 + tw[0] - 45, 0)) + (sgn < 0), np.nan_to_num(np.where(tw[1] > 45, 50 + tw[1] - 45, 0)) + (sgn > 0)], 1)
+        sw = np.where(np.nan_to_num(dz, nan=0.0) < Lb / ppm / 10, 0.0, 200.0); acc = cost[0].copy(); back = np.zeros((n, 2), int)
+        for t in range(1, n):
+            move = acc[::-1] + sw[t]; back[t] = np.where(acc <= move, [0, 1], [1, 0]); acc = np.minimum(acc, move) + cost[t]
+        st = np.zeros(n, int); st[-1] = int(np.argmin(acc))
+        for t in range(n - 1, 0, -1): st[t - 1] = back[t, st[t]]
+        new = np.where(st == 0, 1.0, -1.0); report['twist_turned'] = int((new != sgn).sum()); sgn = new
     Dep[:, a_] = c + sgn * dz / 2; Dep[:, b_] = c - sgn * dz / 2; reach[f'{a_}-{b_}'] = round(float(Lb / ppm), 3)
-P3 = lambda j, dep: np.stack([K[:, j, 0] / ppm, -K[:, j, 1] / ppm, zs * dep], -1)
 ANAT = {'hip': 0, 'knee': 0, 'toe': 0, 'heel': 0, 'arm': 0}
 def in_trunk(Q, k=1.0):
     """a point inside the trunk: between the hip line and the shoulder line, within 0.85 of the shoulders' half-width to either side, and
@@ -217,7 +239,12 @@ def in_trunk(Q, k=1.0):
     return (a > 0.05) & (a < 1.0) & (np.abs(np.einsum('ij,ij->i', r, latn)) < 0.85 * k * hw) & (np.abs(np.einsum('ij,ij->i', r, fw)) < 0.6 * k * hw)
 for p_, c_ in TREE:
     d2 = np.linalg.norm(K[:, c_] - K[:, p_], axis=-1)
-    Lb = np.nanpercentile(d2[np.isfinite(d2)], 95); L_ = Lb / ppm
+    Lb = np.nanpercentile(d2[np.isfinite(d2)], 95)
+    if c_ in (7, 8, 9, 10):                                  # an arm bone no longer than 1.15 of what anatomy gives it against the trunk (upper arm 0.186 H,
+        # forearm 0.146 H, shoulder to hip 0.288 H: Drillis & Contini 1966 in Winter's table): a wrist read far off in a few frames had made
+        # Mixkit 49634's right forearm 0.68 of the trunk (anatomy 0.51), and every other frame read as pointing at the camera
+        Lb = min(Lb, 1.15 * (0.186 if c_ in (7, 8) else 0.146) / 0.288 * Lt)
+    L_ = Lb / ppm
     dz = np.sqrt(np.maximum(0, Lb ** 2 - d2 ** 2)) / ppm
     sgn = near_end(Dm[:, c_] - Dm[:, p_], dz, L_)            # the model's vote, by default
     far = np.isfinite(dz) & (dz > L_ / 3) & face_ok
