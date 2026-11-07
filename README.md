@@ -25,7 +25,7 @@ A slow-motion kickflip, 981 frames at 60 fps, head out of the picture for most o
 | the written skeleton against what was tracked | knees within 1.2 cm, ankles within 2.5 cm |
 | Blender and three.js, the same motion on the same character | 0.00 cm apart over 22 bones, every frame |
 
-`rmo check <work>` proves each of these and proves each check can fail (below).
+`rmo check <work>` proves each of these and proves each check can fail (below). The kickflip's animation is its frames 461 to the end (`rmo solve clean.json solve --from 461`: the trick and its landing).
 
 ## Install
 
@@ -92,7 +92,7 @@ Mixkit's terms forbid handing the files on):
 
 R1 legs and feet held in ≥ 90 % of frames · R2 every limb bone within 5 % of its length · R3 knees in front where a thigh points out,
 none bent backward · R4 a fall filmed 10x slow reads 10x · R5 the written skeleton puts knees and ankles back within 3 cm · R6 no bone
-faster than 1,500°/s · R7 Blender and three.js agree within 2 cm · R8 the rider's leg is a person's: a shoe the detector calls a board never sets the scale. Each has a planted defect that must turn it red.
+faster than 1,500°/s · R7 Blender and three.js agree within 2 cm · R8 the rider's leg is a person's: a shoe the detector calls a board never sets the scale. · R9 no wrist inside the trunk in more than 2 % of frames. Each has a planted defect that must turn it red.
 
 ## What it does not do yet
 

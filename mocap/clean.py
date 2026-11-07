@@ -207,6 +207,14 @@ for a_, b_ in ((11, 12), (5, 6)):                         # the pelvis and the s
     Dep[:, a_] = c + sgn * dz / 2; Dep[:, b_] = c - sgn * dz / 2; reach[f'{a_}-{b_}'] = round(float(Lb / ppm), 3)
 P3 = lambda j, dep: np.stack([K[:, j, 0] / ppm, -K[:, j, 1] / ppm, zs * dep], -1)
 ANAT = {'hip': 0, 'knee': 0, 'toe': 0, 'heel': 0, 'arm': 0}
+def in_trunk(Q, k=1.0):
+    """a point inside the trunk: between the hip line and the shoulder line, within 0.85 of the shoulders' half-width to either side, and
+    within 0.6 of it in front of or behind the trunk's middle (an adult's chest is about 0.6 as deep as half the shoulders' width)"""
+    hp3 = (P3(11, Dep[:, 11]) + P3(12, Dep[:, 12])) / 2; sh3 = (P3(5, Dep[:, 5]) + P3(6, Dep[:, 6])) / 2; upv = sh3 - hp3
+    Lu = np.linalg.norm(upv, axis=-1); lat = P3(5, Dep[:, 5]) - P3(6, Dep[:, 6]); hw = np.linalg.norm(lat, axis=-1) / 2
+    latn = lat / np.maximum(2 * hw, 1e-9)[:, None]; fw = np.cross(latn, upv / np.maximum(Lu, 1e-9)[:, None])
+    v = Q - hp3; a = np.einsum('ij,ij->i', v, upv) / np.maximum(Lu ** 2, 1e-9); r = v - a[:, None] * upv
+    return (a > 0.05) & (a < 1.0) & (np.abs(np.einsum('ij,ij->i', r, latn)) < 0.85 * k * hw) & (np.abs(np.einsum('ij,ij->i', r, fw)) < 0.6 * k * hw)
 for p_, c_ in TREE:
     d2 = np.linalg.norm(K[:, c_] - K[:, p_], axis=-1)
     Lb = np.nanpercentile(d2[np.isfinite(d2)], 95); L_ = Lb / ppm
@@ -228,6 +236,22 @@ for p_, c_ in TREE:
     elif kind == 'toe': sgn = carry(front, face_ok, sgn)     # the toes in front of the ankle
     elif kind == 'heel': sgn = carry(-front, face_ok, sgn)   # the heel behind it
     elif kind == 'arm': sgn = carry(front, face_ok, sgn)
+    if c_ in (7, 8, 9, 10):                                  # AN ARM NEVER GOES THROUGH THE TRUNK (7 Nov, his word on the MOTION cut: "the hands
+        # are going in body"; a wrist was inside the trunk in 8-25 % of the free clips' frames): of the elbow's or wrist's two depths, where the
+        # one taken lies inside the trunk and the other does not, the other
+        # its side chosen over the whole clip at once (a Viterbi path over the bone's two depths, the standard way to settle a two-way ambiguity
+        # in time): a depth inside the trunk costs 20 a frame, going against the model's vote 1, and a change of side 5, except where the bone
+        # lies in the picture's plane (its depth under a tenth of its length), where the two sides meet. Flipped frame by frame instead, a wrist
+        # grazing the trunk's edge spun the forearm at 4,961-6,675°/s (rule R6)
+        cand = [P3(c_, Dep[:, p_] + s_ * dz) for s_ in (1.0, -1.0)]
+        cost = np.stack([50.0 * in_trunk(cand[0]) + (sgn < 0), 50.0 * in_trunk(cand[1]) + (sgn > 0)], 1)
+        sw = np.where(np.nan_to_num(dz, nan=0.0) < L_ / 10, 0.0, 200.0)
+        acc = cost[0].copy(); back = np.zeros((len(sgn), 2), int)
+        for t in range(1, len(sgn)):
+            move = acc[::-1] + sw[t]; back[t] = np.where(acc <= move, [0, 1], [1, 0]); acc = np.minimum(acc, move) + cost[t]
+        st = np.zeros(len(sgn), int); st[-1] = int(np.argmin(acc))
+        for t in range(len(sgn) - 1, 0, -1): st[t - 1] = back[t, st[t]]
+        new = np.where(st == 0, 1.0, -1.0); ANAT['arm'] += int((new != sgn).sum()); sgn = new
     if kind: ANAT[kind] += int(far.sum())
     Dep[:, c_] = Dep[:, p_] + sgn * dz
     reach[f'{p_}-{c_}'] = round(float(L_), 3)

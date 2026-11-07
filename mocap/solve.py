@@ -69,7 +69,32 @@ L = {'thigh': (med(P('Lknee') - P('Lhip')) + med(P('Rknee') - P('Rhip'))) / 2, '
 x_hips = P('Lhip') - P('Rhip'); up = fillv(P('chest') - P('hips'))
 Mhips = frame_from(x_hips, up, 'Hips'); Mhips[:, :, 2] = np.cross(Mhips[:, :, 0], Mhips[:, :, 1])        # the hip line exact (x, his left), up made square to it, z forward
 Mchest = frame_from(P('Lshoulder') - P('Rshoulder'), up, 'Spine2'); Mchest[:, :, 2] = np.cross(Mchest[:, :, 0], Mchest[:, :, 1])
-Mhead = frame_from(P('head') - P('chest'), X[:, 3] - X[:, 4], 'Head')[:, :, [1, 0, 2]]; Mhead[:, :, 2] = np.cross(Mhead[:, :, 0], Mhead[:, :, 1])
+# THE HEAD (7 Nov, his word on the MOTION cut: "the character is flailing in the head"). Its line across was the ears', and ears hidden,
+# swapped or out of the frame flipped it between frames: the head turned 8,627°/s of real time on Mixkit 34382 (rule R6 reads it now on the
+# free clips). A head turns at most about 80° either way of the chest, bends about 50° forward and 60° back, and 45° to a side (the cervical
+# spine's range of motion: AAOS, "Joint Motion: Method of Measuring and Recording", 1965; Youdas et al., Phys Ther 72(11), 1992). So the ears'
+# line is turned to the chest's side when it points the other way (the ears swapped: no neck turns 90°), the head's turn against the chest
+# is held inside that range, its spikes taken out (a median of 5) and low-passed at 3 Hz of real time, and the head is put back on the chest.
+ear = X[:, 3] - X[:, 4]
+ear[np.nan_to_num(np.einsum('ij,ij->i', ear, Mchest[:, :, 0])) < 0] *= -1
+Mhead = frame_from(P('head') - P('chest'), ear, 'Head')[:, :, [1, 0, 2]]; Mhead[:, :, 2] = np.cross(Mhead[:, :, 0], Mhead[:, :, 1])
+from scipy.signal import medfilt as _medfilt, butter as _bw, filtfilt as _ff
+HEAD_RANGE = np.radians([[-80, 80], [-50, 50], [-45, 45]])     # yaw (about the chest's up), pitch (about its side; 50 the lesser of 50/60), roll
+_e = Rot.from_matrix(np.einsum('nji,njk->nik', Mchest, Mhead)).as_euler('YXZ')
+for _k in range(3):
+    _v = _e[:, _k]; _ok = np.isfinite(_v)
+    if _ok.sum() >= 2: _v = np.interp(np.arange(n), np.flatnonzero(_ok), _v[_ok])
+    _v = np.clip(np.unwrap(np.nan_to_num(_v)), *HEAD_RANGE[_k])
+    if n >= 9:
+        _v = _medfilt(_v, 5); _b, _a = _bw(2, min(0.99, 3.0 / (A.fps / 2))); _v = _ff(_b, _a, _v)
+    _e[:, _k] = np.clip(_v, *HEAD_RANGE[_k])
+# where the face is not seen (the nose or an ear out of the picture or hidden: Mixkit 34382's last third, 12-27 % of its frames) its turn is a
+# guess over bridged points, and the head tipped 45° there: it follows the chest instead, weighted by how much of the face the last quarter
+# second saw
+_vis = np.isfinite(X[:, [0, 3, 4], 0]).all(1).astype(float); _w = max(1, int(round(0.25 * A.fps)))
+_vis = np.convolve(np.pad(_vis, _w // 2, mode='edge'), np.ones(_w) / _w, 'same')[_w // 2: _w // 2 + n]
+_e = _e * _vis[:, None]
+Mhead = np.einsum('nij,njk->nik', Mchest, Rot.from_euler('YXZ', _e).as_matrix())
 I3 = np.eye(3)
 W = {'Hips': Mhips, 'Spine2': Mchest, 'Head': Mhead}                                       # rest frames are the identity
 qs = lambda M: Rot.from_matrix(M)
