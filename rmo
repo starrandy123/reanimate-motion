@@ -1,0 +1,27 @@
+#!/bin/bash
+# rmo: reanimate-motion's commands. The kit's own Python lives in .venv (rmo setup), so the system's Python is never touched.
+K="$(cd "$(dirname "$0")" && pwd)"; PY="$K/.venv/bin/python"; cmd="$1"; shift || true
+blender() { for b in "$BLENDER" /Applications/Blender.app/Contents/MacOS/Blender "$(command -v blender)"; do [ -x "$b" ] && { echo "$b"; return; }; done; }
+case "$cmd" in
+  setup)  P=$(command -v python3.12 || command -v python3.11 || command -v python3); "$P" -m venv "$K/.venv" && "$PY" -m pip -q install --upgrade pip && "$PY" -m pip -q install -r "$K/requirements.txt" && echo "rmo: ready" ;;
+  doctor) [ -x "$PY" ] && echo "python: $("$PY" --version)" || echo "python: missing (rmo setup)"; "$PY" -I -c "import rtmlib, onnxruntime, cv2, scipy; print('trackers: ready')" 2>/dev/null || echo "trackers: missing (rmo setup)"
+          command -v node >/dev/null && echo "node: $(node --version)" || echo "node: missing (the viewer and the checks need it)"; B=$(blender); [ -n "$B" ] && echo "blender: $B" || echo "blender: not found (only rmo blender needs it)" ;;
+  track)  "$PY" -I "$K/mocap/track.py" "$@" ;;
+  clean)  "$PY" -I "$K/mocap/clean.py" "$@" ;;
+  solve)  "$PY" -I "$K/mocap/solve.py" "$@" ;;
+  all)    v="$1"; w="$2"; shift 2; mkdir -p "$w" && "$PY" -I "$K/mocap/track.py" "$v" "$w" && "$PY" -I "$K/mocap/clean.py" "$w/track.json" "$w/clean.json" && "$PY" -I "$K/mocap/solve.py" "$w/clean.json" "$w/solve" "$@" ;;
+  view)   node "$K/tests/view.mjs" "$@" ;;
+  blender) B=$(blender); [ -z "$B" ] && { echo "rmo: Blender not found (set BLENDER=/path/to/blender)"; exit 1; }; "$B" --background --python "$K/examples/blender/apply_motion.py" -- "$@" ;;
+  check)  "$PY" -I "$K/tests/check_rules.py" "$@" ;;
+  *) cat <<'U'
+rmo setup                                   once: the kit's own Python with the trackers
+rmo doctor                                  what is installed, what is missing
+rmo all <video> <work> [--from F --to F]    track, clean and solve in one go
+rmo track <video> <work> [--from N --to M]  every frame: the whole body, the board, the shoes  -> track.json + track_overlay.mp4
+rmo clean <track.json> <clean.json>         blend, clean, depth, clock                           -> clean.json
+rmo solve <clean.json> <out> [--fps 60]     the skeleton's turns                                  -> motion.bvh + motion.json
+rmo view <solve dir> <out dir>              the three.js example, stilled at chosen times
+rmo blender <motion.json> <character> <out> a Blender character keyed with the motion (.glb .fbx .blend)
+rmo check <work>                            every rule, each proven red by its plant
+U
+esac

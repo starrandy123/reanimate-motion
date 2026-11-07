@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><title>hosts agree</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/" } }</script>
+<script type="module">
+/* THE TWO HOSTS AGREE: the character wearing the motion in three.js (web/retarget.js) and the same character Blender keyed and exported
+   (examples/blender/apply_motion.py), each bone's world place compared frame by frame. ?motion=&character=&baked= */
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { bindMotion, findBones } from '../web/retarget.js';
+const Q = new URLSearchParams(location.search), L = new GLTFLoader();
+const motion = await (await fetch(Q.get('motion'))).json();
+const a = (await L.loadAsync(Q.get('character'))).scene, bg = await L.loadAsync(Q.get('baked')), b = bg.scene;
+const m = bindMotion(a, motion), mixer = new THREE.AnimationMixer(b), act = mixer.clipAction(bg.animations[0]); act.play();
+const A = findBones(a), B = findBones(b), names = Object.keys(A).filter((k) => B[k]);
+let worst = 0, sum = 0, cnt = 0, at = null; const per = {};
+for (let f = 0; f < motion.frames; f++) {
+  const t = f / motion.fps; m.apply(t); a.updateMatrixWorld(true); mixer.setTime(t + (Q.get('plant') === 'late' ? 1 / motion.fps : 0)); b.updateMatrixWorld(true);   // plant: Blender's keys a frame late
+  for (const k of names) {
+    const d = A[k].getWorldPosition(new THREE.Vector3()).distanceTo(B[k].getWorldPosition(new THREE.Vector3()));
+    sum += d; cnt++; if (d > worst) { worst = d; at = [k, f]; } const q = per[k] || (per[k] = [0, 0]); q[0] += d / motion.frames; q[1] = Math.max(q[1], d);
+  }
+}
+const shifts = {};
+for (const sh of [-1, 0, 1]) { let s2 = 0, c2 = 0; for (let f = 1; f < motion.frames - 1; f++) { m.apply(f / motion.fps); a.updateMatrixWorld(true); mixer.setTime((f + sh) / motion.fps); b.updateMatrixWorld(true);
+  for (const k of names) { s2 += A[k].getWorldPosition(new THREE.Vector3()).distanceTo(B[k].getWorldPosition(new THREE.Vector3())); c2++; } } shifts[sh] = +(100 * s2 / c2).toFixed(2); }
+window.__hosts = { shifts, per: Object.fromEntries(Object.entries(per).map(([k, v]) => [k, [+(v[0] * 100).toFixed(1), +(v[1] * 100).toFixed(1)]])), names: { three: Object.fromEntries(names.map((k) => [k, A[k].name])), parents: Object.fromEntries(names.map((k) => [k, A[k].parent.name])) }, bones: names.length, frames: motion.frames, mean_cm: 100 * sum / cnt, worst_cm: 100 * worst, worst_at: at, clips: bg.animations.length };
+</script>

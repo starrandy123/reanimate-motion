@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reanimate-motion viewer</title>
+<style>
+  :root { --bg: #f4f2ee; --ink: #1d1c1a; --line: #c9c4bb; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151413; --ink: #ecebe8; --line: #3a3835; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+  canvas { display: block; }
+  #bar { position: fixed; left: 16px; right: 16px; bottom: 16px; display: flex; gap: 12px; align-items: center; }
+  #bar input[type=range] { flex: 1; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 6px; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="bar"><button id="play">Pause</button><input id="scrub" type="range" min="0" max="1000" value="0"><span id="clock">0.00 s</span></div>
+<script type="module">
+/* ?motion=<motion.json>&character=<a T-posed .glb with Mixamo, Unreal or VRM bone names>&speed=1
+   Left: the solved skeleton as sticks (what rmo solve wrote). Right: the character wearing it (web/retarget.js). */
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { bindMotion } from '../../web/retarget.js';
+const Q = new URLSearchParams(location.search), motionUrl = Q.get('motion') || 'motion.json', charUrl = Q.get('character');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight); document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f4f2ee');
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 100); camera.position.set(0.9, 1.1, 4.2);
+const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0.9, 0.9, 0); controls.update();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8070, 2.2)); const sun = new THREE.DirectionalLight(0xffffff, 2); sun.position.set(2, 4, 3); scene.add(sun);
+scene.add(new THREE.GridHelper(8, 16, 0x9a958c, 0xc9c4bb));
+const motion = await (await fetch(motionUrl)).json();
+/* the solved skeleton, as sticks: each bone at its parent's place plus its rest offset turned by the parent's world turn */
+const names = motion.bones, idx = Object.fromEntries(names.map((b, i) => [b, i]));
+const sticks = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xd2552d }));
+sticks.geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(names.length * 6), 3)); scene.add(sticks);
+const joints = new THREE.InstancedMesh(new THREE.SphereGeometry(0.018, 8, 6), new THREE.MeshBasicMaterial({ color: 0x1d1c1a }), names.length); scene.add(joints);
+function fk(f) {
+  const pos = {}, rot = {}, h = motion.hips[f];
+  for (const b of names) {
+    const w = motion.world[b][f]; rot[b] = new THREE.Quaternion(w[0], w[1], w[2], w[3]);
+    const p = motion.parent[idx[b]];
+    pos[b] = p ? pos[p].clone().add(new THREE.Vector3(...motion.rest_offset[idx[b]]).applyQuaternion(rot[p])) : new THREE.Vector3(h[0], h[1], h[2]);
+  }
+  return pos;
+}
+let char = null, bound = null;
+if (charUrl) {
+  const g = await new GLTFLoader().loadAsync(charUrl); char = g.scene; char.position.x = 1.8; scene.add(char);
+  for (const name of (Q.get('hide') || '').split(',').filter(Boolean)) char.traverse((o) => { if (o.name === name) o.visible = false; });   // ?hide=attach-righthand-mesh: a prop the model holds
+  bound = bindMotion(char, motion, { inPlace: false });
+}
+const off = new THREE.Vector3(motion.hips[0][0], 0, motion.hips[0][2]);   // both start over the origin
+let t = 0, playing = true, speed = +(Q.get('speed') || 1), last = performance.now();
+function draw(time) {
+  const f = Math.max(0, Math.min(motion.frames - 1, Math.round(time * motion.fps))), pos = fk(f), arr = sticks.geometry.attributes.position.array, m = new THREE.Matrix4();
+  names.forEach((b, i) => {
+    const p = motion.parent[i], a = pos[b].clone().sub(off), c = (p ? pos[p] : pos[b]).clone().sub(off);
+    arr.set([a.x, a.y, a.z, c.x, c.y, c.z], i * 6); joints.setMatrixAt(i, m.makeTranslation(a.x, a.y, a.z));
+  });
+  sticks.geometry.attributes.position.needsUpdate = true; joints.instanceMatrix.needsUpdate = true;
+  if (bound) { bound.apply(time); }
+  renderer.render(scene, camera);
+  document.getElementById('clock').textContent = time.toFixed(2) + ' s';
+}
+const dur = motion.frames / motion.fps;
+renderer.setAnimationLoop((now) => {
+  if (playing) { t = (t + (now - last) / 1000 * speed) % dur; document.getElementById('scrub').value = String(Math.round(t / dur * 1000)); }
+  last = now; draw(t);
+});
+document.getElementById('play').onclick = (e) => { playing = !playing; e.target.textContent = playing ? 'Pause' : 'Play'; };
+document.getElementById('scrub').oninput = (e) => { playing = false; document.getElementById('play').textContent = 'Play'; t = e.target.value / 1000 * dur; };
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+function probe(time) {   /* where things are, for tests: the character's bones and the solved skeleton's joints, world metres */
+  draw(time); const f = Math.max(0, Math.min(motion.frames - 1, Math.round(time * motion.fps))), pos = fk(f), out = { character: {}, solved: {} };
+  if (bound) for (const [k, b] of Object.entries(bound.bones)) { const v = b.getWorldPosition(new THREE.Vector3()); out.character[k] = [v.x, v.y, v.z]; }
+  for (const k of ['Hips', 'LeftLeg', 'RightLeg', 'LeftFoot', 'RightFoot', 'LeftHand', 'RightHand', 'Head']) { const v = pos[k].clone().sub(off); out.solved[k] = [v.x, v.y, v.z]; }
+  out.scale = bound ? bound.scale : null; return out;
+}
+window.__rmo = { duration: dur, frames: motion.frames, fps: motion.fps, bones: bound ? Object.keys(bound.bones) : [], set(time) { playing = false; t = time; draw(t); }, probe(time) { playing = false; t = time; return probe(time); }, camera, controls, ready: true };
+</script>
+</body>
+</html>
