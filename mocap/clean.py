@@ -19,7 +19,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view as win
 from scipy.signal import butter, filtfilt
 from scipy.interpolate import PchipInterpolator
-import os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); from clock import fit_slowmo   # the kit's own module (python -I leaves the script's folder off the path)
+import os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); from clock import fit_slowmo; from scale import pick as pick_scale   # the kit's own modules (python -I leaves the script's folder off the path)
 
 ap = argparse.ArgumentParser(); ap.add_argument('track'); ap.add_argument('out'); ap.add_argument('--slowmo', type=float)
 ap.add_argument('--cutoff', type=float, default=12.0); ap.add_argument('--thr', type=float, default=0.3)
@@ -97,10 +97,12 @@ BONES = [(5, 7), (7, 9), (6, 8), (8, 10), (11, 13), (13, 15), (12, 14), (14, 16)
 face = np.isfinite(Z[:, [0, 3, 4]]).all(1)
 zs = -1.0 if A.two_d or face.sum() == 0 or np.nanmedian(Z[face, 0] - Z[face][:, [3, 4]].mean(1)) < 0 else 1.0   # the nose's depth below the ears': it grows away from the camera
 root = np.nanmean(Z[:, [11, 12]], 1)
-# 6 THE SCALE
-BOARD_M = 0.81                                      # a deck is 31-33 in long (0.79-0.84 m); side-on to a camera in front of the rider
+# 6 THE SCALE: the board when the leg it implies is a person's, else an adult's leg (mocap/scale.py). A box refused as the rider's board
+# is not the rider's board anywhere after: not the scale, not the flight, not in the output
 bw = board[:, 2] - board[:, 0]
-ppm = float(np.nanpercentile(bw, 75) / BOARD_M) if np.isfinite(bw).sum() > 20 else float(legpx / 0.87)   # else an adult's leg, 0.87 m
+legs2 = np.concatenate([np.linalg.norm(K[:, h_] - K[:, k_], axis=-1) + np.linalg.norm(K[:, k_] - K[:, a_], axis=-1) for h_, k_, a_ in ((11, 13, 15), (12, 14, 16))])
+ppm, scale_from, refused = pick_scale(bw, np.nanpercentile(legs2[np.isfinite(legs2)], 95))
+if refused: report['board_refused'] = refused; board[:] = np.nan
 # 7 the clock, from gravity: the centre of mass's fall in the air
 X = np.zeros((n, J, 3)); X[..., 0] = (K[..., 0] - np.nanmedian(K[:, [11, 12], 0])) / ppm; X[..., 1] = -(K[..., 1]) / ppm   # heights: all the clock reads
 def com(P):
@@ -261,7 +263,7 @@ for p_, c_ in TREE:
     moved = X[:, p_] + v / np.maximum(d, 1e-9) * L_; fin = np.isfinite(moved).all(-1); X[fin, c_] = moved[fin]
 lens = {f'{a_}-{b_}': float(np.nanmedian(np.linalg.norm(X[:, a_] - X[:, b_], axis=-1))) for a_, b_ in BONES[:8]}
 rig = [float(np.nanstd(np.linalg.norm(X[:, a_] - X[:, b_], axis=-1)) / max(1e-6, lens[f'{a_}-{b_}'])) for a_, b_ in BONES[:8]]
-report.update(px_per_m=round(ppm, 1), scale_from='the board (0.81 m)' if np.isfinite(bw).sum() > 20 else 'an adult leg (0.87 m)', depth_sign=zs,
+report.update(px_per_m=round(ppm, 1), scale_from=scale_from, depth_sign=zs,
               bone_length_spread=round(float(np.mean(rig)), 3), bones_m=reach)
 
 Bm = np.full((n, 4), np.nan); Bm[:, 0] = ((board[:, 0] + board[:, 2]) / 2 - np.nanmedian(K[:, [11, 12], 0])) / ppm; Bm[:, 1] = -((board[:, 1] + board[:, 3]) / 2) / ppm

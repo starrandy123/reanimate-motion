@@ -8,11 +8,13 @@ turns it red: a check that cannot fail is no check.
   R4 CLOCK    a body falling at 9.81 m/s², filmed 10x slow, reads back 10x (3 %)    plant: it falls at half gravity
   R5 SOLVED   the written skeleton puts the knees and ankles back within 3 cm        plant: one thigh turned 25°
   R6 SMOOTH   no bone turns faster than 1,500°/s of real time (99th percentile)     plant: the thighs swapped for one frame
-  R7 HOSTS    Blender's keyed character and three.js's retarget agree within 2 cm    plant: Blender's keys one frame late"""
+  R7 HOSTS    Blender's keyed character and three.js's retarget agree within 2 cm    plant: Blender's keys one frame late
+  R8 SCALE    the rider's leg is a person's (0.60-1.15 m), and a shoe the detector calls a board in 31 frames does not set the scale
+                                                                                      plant: the board taken whatever leg it implies (before 7 Nov)"""
 import sys, os, json, copy, subprocess
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..', 'mocap')); from clock import fit_slowmo
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..', 'mocap')); from clock import fit_slowmo; from scale import pick as pick_scale, LEG_RANGE
 W = sys.argv[1]; opt = lambda k, d=None: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
 T = json.load(open(os.path.join(W, 'track.json'))); C = json.load(open(os.path.join(W, 'clean.json'))); M = json.load(open(os.path.join(W, 'solve', 'motion.json')))
 X = np.array(C['X'], float)
@@ -83,9 +85,26 @@ def r7(plant):
     return out.returncode == 0, f"the hosts agree within {d.get('worst_cm', float('nan')):.2f} cm over {d.get('bones')} bones"
 
 XW = X[M['clip_from']:M['clip_to']]   # the frames that become the animation: what the kit ships is what the anatomy rule reads
+def legs_px(T):
+    """the pictured legs, hip to knee to ankle, in pixels: their median and 95th percentile (what clean reads)"""
+    out = []
+    for r in T['frames']:
+        if 'k' not in r: continue
+        k = np.array(r['k'], float); sc = np.array(r['s'])
+        for h, kn, a in ((11, 13, 15), (12, 14, 16)):
+            if min(sc[h], sc[kn], sc[a]) >= 0.3: out.append(np.linalg.norm(k[h] - k[kn]) + np.linalg.norm(k[kn] - k[a]))
+    return float(np.median(out)), float(np.percentile(out, 95))
+def r8(open_range=False):
+    lens = C['bones_m']; leg = (lens['11-13'] + lens['13-15'] + lens['12-14'] + lens['14-16']) / 2
+    med, p95 = legs_px(T); n = len(T['frames'])
+    bw = np.full(n, np.nan); bw[np.linspace(0, n - 1, 31).astype(int)] = p95 / 3          # a dancer's shoes, called a board in 31 frames
+    ppm, src, _ = pick_scale(bw, p95, leg_range=(0.0, np.inf) if open_range else LEG_RANGE)
+    shoe = p95 / ppm; lo, hi = LEG_RANGE
+    return lo <= leg <= hi and lo <= shoe <= hi, f"the rider's leg {leg:.2f} m; a shoe called a board in 31 frames: the scale from {src}, the leg {shoe:.2f} m"
 RULES = [('R1 TRACKED', lambda: r1(T), lambda: r1(p1(T))), ('R2 RIGID', lambda: r2(X), lambda: r2(p2(X))), ('R3 ANATOMY', lambda: r3(XW), lambda: r3(p3(XW))),
          ('R4 CLOCK', lambda: r4(9.81), lambda: r4(9.81 / 2)), ('R5 SOLVED', lambda: r5(M['world']), lambda: r5(p5(M['world']))),
-         ('R6 SMOOTH', lambda: r6(M['world']), lambda: r6(p6(M['world']))), ('R7 HOSTS', lambda: r7(False), lambda: r7(True))]
+         ('R6 SMOOTH', lambda: r6(M['world']), lambda: r6(p6(M['world']))), ('R7 HOSTS', lambda: r7(False), lambda: r7(True)),
+         ('R8 SCALE', lambda: r8(False), lambda: r8(True))]
 held = True
 for name, real, plant in RULES:
     ok, say = real(); pok, psay = plant()

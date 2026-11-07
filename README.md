@@ -92,11 +92,13 @@ Mixkit's terms forbid handing the files on):
 
 R1 legs and feet held in ≥ 90 % of frames · R2 every limb bone within 5 % of its length · R3 knees in front where a thigh points out,
 none bent backward · R4 a fall filmed 10x slow reads 10x · R5 the written skeleton puts knees and ankles back within 3 cm · R6 no bone
-faster than 1,500°/s · R7 Blender and three.js agree within 2 cm. Each has a planted defect that must turn it red.
+faster than 1,500°/s · R7 Blender and three.js agree within 2 cm · R8 the rider's leg is a person's: a shoe the detector calls a board never sets the scale. Each has a planted defect that must turn it red.
 
 ## What it does not do yet
 
-One person; a camera that holds still (a moving camera needs its own motion taken from the background: next). Parts out
+One person; a camera that holds still (a moving camera needs its own motion taken from the background: next), and the person at
+about one distance from it (the scale is one for the whole clip: someone who runs at the camera reads wrong where they are far; a
+scale for each frame is next). Parts out
 of the picture are bridged, not seen. Depth from one camera is reconstructed, not measured. Hands and fingers turn only with
 `--hands`, for clips where they are large and sharp. Licences, and what they mean for commercial use: [CREDITS.md](CREDITS.md).
 
